@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Generate Test | EXIM</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    body { font-family: "Poppins", Arial, sans-serif; background-color: #f4f6f8; color: #333; }
+    .navbar { background-color: #1f2937; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 6px 0; }
+    .navbar-brand { font-weight: 600; color: #fff !important; font-size: 1.1rem; }
+    .navbar-brand:hover { color: #10b981 !important; transform: scale(1.05); }
+    .nav-link { color: #fff !important; font-size: 1rem; transition: color 0.3s ease; }
+    .nav-link:hover { color: #10b981 !important; }
+    h1 { text-align: center; margin: 40px 0 20px; color: #1f2937; font-weight: 600; }
+    form { max-width: 700px; margin: 0 auto; padding: 30px; background: #fff; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.05); }
+    label { font-weight: 500; }
+    .form-control, .form-select { margin-bottom: 15px; border-radius: 8px; border: 1px solid #e5e7eb; padding: 10px; }
+    .btn-generate { width: 100%; background-color: #10b981; color: white; border: none; border-radius: 8px; padding: 12px; font-size: 16px; font-weight: 500; }
+    .btn-generate:hover { background-color: #059669; }
+    .error-message { color: #ef4444; font-size: 14px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container">
+      <a class="navbar-brand" href="{% url 'home' %}">EXIM</a>
+      <div class="collapse navbar-collapse justify-content-end">
+        <ul class="navbar-nav">
+          <li class="nav-item"><a class="nav-link" href="{% url 'question_bank' %}">Question Bank</a></li>
+          <li class="nav-item"><a class="nav-link" href="{% url 'generate_test' %}">Generate Test</a></li>
+          <li class="nav-item"><a class="nav-link" href="{% url 'logout' %}">Logout</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <h1>Generate Test</h1>
+
+  <form method="post" onsubmit="return validateForm()">
+    {% csrf_token %}
+
+    <div class="mb-3">
+      <label for="board_exam">Board Exam:</label>
+      <select id="board_exam" name="board_exam" class="form-select" onchange="updateSubjects()" required>
+        <option value="">--Select Board Exam--</option>
+        {% for exam in BOARD_EXAMS %}
+          <option value="{{ exam }}">{{ exam }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="mb-3">
+      <label for="subject">Subject:</label>
+      <select id="subject" name="subject" class="form-select" required>
+        <option value="">--Select Subject--</option>
+      </select>
+    </div>
+
+    <div class="mb-3">
+      <label for="num_questions">Number of Questions:</label>
+      <input type="number" id="num_questions" name="num_questions" class="form-control" min="1" required>
+    </div>
+
+    <div class="mb-3">
+      <label>Difficulty Percentage Split (total must equal 100%):</label>
+
+      <div class="mb-2">
+        <label for="very_easy_pct" class="form-label">Very Easy: <span id="very_easy_val">20</span>%</label>
+        <input type="range" class="form-range" id="very_easy_pct" name="ve_pct" min="0" max="100" value="20">
+      </div>
+
+      <div class="mb-2">
+        <label for="easy_pct" class="form-label">Easy: <span id="easy_val">20</span>%</label>
+        <input type="range" class="form-range" id="easy_pct" name="e_pct" min="0" max="100" value="20">
+      </div>
+
+      <div class="mb-2">
+        <label for="moderate_pct" class="form-label">Moderate: <span id="moderate_val">20</span>%</label>
+        <input type="range" class="form-range" id="moderate_pct" name="m_pct" min="0" max="100" value="20">
+      </div>
+
+      <div class="mb-2">
+        <label for="hard_pct" class="form-label">Hard: <span id="hard_val">20</span>%</label>
+        <input type="range" class="form-range" id="hard_pct" name="h_pct" min="0" max="100" value="20">
+      </div>
+
+      <div class="mb-2">
+        <label for="very_hard_pct" class="form-label">Very Hard: <span id="very_hard_val">20</span>%</label>
+        <input type="range" class="form-range" id="very_hard_pct" name="vh_pct" min="0" max="100" value="20">
+      </div>
+    </div>
+
+    <button type="submit" class="btn-generate">Generate Test</button>
+
+    {% if error_message %}
+      <p class="error-message">{{ error_message }}</p>
+    {% endif %}
+  </form>
+
+  {% if selected_questions %}
+  <div class="generated-section mt-4">
+    <h2>Generated Questions</h2>
+    <ol>
+      {% for question in selected_questions %}
+        <li>
+          <strong>{{ question.question_text }}</strong><br>
+          {% if question.image %}
+            <img src="{{ question.image.url }}" alt="Question Image">
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+
+  <script>
+    const SUBJECTS = JSON.parse('{{ SUBJECTS_JSON|escapejs }}');
+
+    function updateSubjects() {
+      const boardExamSelect = document.getElementById("board_exam");
+      const subjectSelect = document.getElementById("subject");
+      subjectSelect.innerHTML = '<option value="">--Select Subject--</option>';
+      const selectedExam = boardExamSelect.value;
+      if (selectedExam && SUBJECTS[selectedExam]) {
+        Object.keys(SUBJECTS[selectedExam]).forEach(sub => {
+          subjectSelect.add(new Option(sub, sub));
+        });
+      }
+    }
+
+    function validateForm() {
+        const subject = document.getElementById("subject").value;
+        const numQuestions = parseInt(document.getElementById("num_questions").value);
+
+        const veryEasy = parseInt(document.getElementById("very_easy_pct").value);
+        const easy = parseInt(document.getElementById("easy_pct").value);
+        const moderate = parseInt(document.getElementById("moderate_pct").value);
+        const hard = parseInt(document.getElementById("hard_pct").value);
+        const veryHard = parseInt(document.getElementById("very_hard_pct").value);
+
+        if (!subject || !numQuestions) {
+            alert("⚠️ Please fill in all fields before generating a test.");
+            return false;
+        }
+
+        const totalPct = veryEasy + easy + moderate + hard + veryHard;
+        if (totalPct !== 100) {
+            alert("⚠️ Total percentage of all difficulties must equal 100%");
+            return false;
+        }
+
+        if (numQuestions <= 0) {
+            alert("⚠️ Number of questions must be greater than 0.");
+            return false;
+        }
+
+        return true;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const sliders = {
+        very_easy: document.getElementById('very_easy_pct'),
+        easy: document.getElementById('easy_pct'),
+        moderate: document.getElementById('moderate_pct'),
+        hard: document.getElementById('hard_pct'),
+        very_hard: document.getElementById('very_hard_pct')
+      };
+
+      const values = {
+        very_easy: document.getElementById('very_easy_val'),
+        easy: document.getElementById('easy_val'),
+        moderate: document.getElementById('moderate_val'),
+        hard: document.getElementById('hard_val'),
+        very_hard: document.getElementById('very_hard_val')
+      };
+
+      function updateValues() {
+        for (let key in sliders) {
+          values[key].innerText = sliders[key].value;
+        }
+      }
+
+      function adjustSliders(changedKey) {
+        let total = 0;
+        for (let key in sliders) {
+          if (key !== changedKey) total += parseInt(sliders[key].value);
+        }
+
+        let remaining = 100 - parseInt(sliders[changedKey].value);
+        if (remaining < 0) remaining = 0;
+
+        // Distribute remaining proportionally
+        let sumOthers = total || 1;
+        for (let key in sliders) {
+          if (key !== changedKey) {
+            sliders[key].value = Math.round(parseInt(sliders[key].value) / sumOthers * remaining);
+          }
+        }
+
+        // Correct rounding errors
+        let sumNow = 0;
+        for (let key in sliders) sumNow += parseInt(sliders[key].value);
+        let diff = 100 - sumNow;
+        sliders['very_hard'].value = parseInt(sliders['very_hard'].value) + diff;
+
+        updateValues();
+      }
+
+      for (let key in sliders) {
+        sliders[key].addEventListener('input', () => adjustSliders(key));
+      }
+
+      updateValues();
+    });
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

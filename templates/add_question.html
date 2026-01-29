@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Add Questions | EXIM</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+<style>
+body { font-family: "Poppins", Arial, sans-serif; background-color: #f4f6f8; color: #333; }
+.navbar { background-color: #1f2937; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); padding-top: 6px; padding-bottom: 6px; }
+.navbar-brand { font-weight: 600; color: #fff; font-size: 1.1rem; }
+.navbar-brand:hover { color: #10b981; transform: scale(1.05); }
+.nav-link { color: #fff; font-size: 1rem; }
+.nav-link:hover { color: #10b981; }
+h1 { text-align:center; margin:40px 0 20px; color:#1f2937; font-weight:600; }
+form { max-width: 900px; margin:0 auto 50px; }
+.question-block { border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb; padding:15px; margin-bottom:20px; }
+.question-block:hover { box-shadow:0 2px 12px rgba(0,0,0,0.08); background:#fff; }
+.upload-button { display:none; padding:12px; background:#2563eb; color:#fff; border:none; border-radius:8px; width:100%; font-weight:500; cursor:pointer; }
+.upload-button:hover { background:#1d4ed8; }
+.generate-btn { background:#10b981; color:#fff; border:none; width:100%; }
+.generate-btn:hover { background:#059669; }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark">
+<div class="container">
+<a class="navbar-brand" href="{% url 'home' %}">EXIM</a>
+<div class="collapse navbar-collapse justify-content-end">
+<ul class="navbar-nav">
+<li class="nav-item"><a class="nav-link" href="{% url 'question_bank' %}">Question Bank</a></li>
+<li class="nav-item"><a class="nav-link" href="{% url 'question_bank' %}">Upgrade</a></li>
+<li class="nav-item"><a class="nav-link" href="{% url 'logout' %}">Logout</a></li>
+</ul>
+</div>
+</div>
+</nav>
+
+<h1>Add Questions</h1>
+
+<form method="post" enctype="multipart/form-data">
+{% csrf_token %}
+<div class="row g-3 align-items-end mb-4">
+  <div class="col-md-6">
+    <label class="form-label fw-semibold">Select Board Exam(s)</label>
+    <div id="boardExamContainer" class="d-flex flex-wrap gap-2">
+      {% for exam in BOARD_EXAMS %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="board_exam_checkbox" value="{{ exam }}" id="exam_{{ forloop.counter }}">
+          <label class="form-check-label" for="exam_{{ forloop.counter }}">{{ exam }}</label>
+        </div>
+      {% endfor %}
+    </div>
+  </div>  
+<div class="col-md-4">
+<label for="numQuestions" class="form-label fw-semibold">Number of Questions</label>
+<input type="number" id="numQuestions" class="form-control" min="1" max="50" placeholder="e.g. 10" />
+</div>
+<div class="col-md-2">
+<button type="button" class="btn generate-btn" onclick="generateQuestionFields()">Create</button>
+</div>
+</div>
+
+<div id="questionsContainer"></div>
+<button type="submit" class="upload-button mt-3">Save All Questions</button>
+</form>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const BOARD_EXAM_TOPICS = JSON.parse('{{ BOARD_EXAM_TOPICS_JSON|escapejs }}');
+        const LEVELS = JSON.parse('{{ LEVELS_JSON|escapejs }}');
+    
+        let currentQuestionIndex = 0;
+    
+        function createQuestionBlock(i, preset = null) {
+            const container = document.getElementById("questionsContainer");
+            const block = document.createElement("div");
+            block.classList.add("question-block");
+            block.dataset.index = i;
+    
+            let difficultyOptions = LEVELS.map(
+                lvl => `<option value="${lvl}" ${preset?.level === lvl ? "selected" : ""}>${lvl}</option>`
+            ).join("");
+    
+            let boardExamInputs = preset.boardExams.map(exam =>
+                `<input type="hidden" name="board_exam_${i}" value="${exam}">`
+            ).join("");
+    
+            block.innerHTML = `
+                ${boardExamInputs}
+                <h5>Question ${i}</h5>
+    
+                <textarea name="question_text_${i}" class="form-control mb-3"
+                    rows="2" placeholder="Enter question text..." required></textarea>
+    
+                <div class="mb-3">
+                    <label>Subjects</label>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary dropdown-toggle w-100"
+                            type="button" id="subjectsDropdown_${i}" data-bs-toggle="dropdown">
+                            ${preset.subjects.length ? preset.subjects.join(", ") : "Select Subject(s)"}
+                        </button>
+                        <ul class="dropdown-menu w-100 p-2"
+                            id="subjectsDropdownMenu_${i}" style="max-height:200px;overflow-y:auto;"></ul>
+                    </div>
+                </div>
+    
+                <div class="mb-3">
+                    <label>Topic</label>
+                    <select name="topic_${i}" class="form-select" required></select>
+                </div>
+    
+                <div class="mb-3">
+                    <label>Difficulty</label>
+                    <select name="level_${i}" class="form-select" required>
+                        ${difficultyOptions}
+                    </select>
+                </div>
+    
+                ${["A","B","C","D","E"].map(letter => `
+                    <div class="input-group mb-1">
+                        <span class="input-group-text">${letter}.</span>
+                        <input type="text" class="form-control"
+                            name="choice${letter}_${i}" ${letter !== "E" ? "required" : ""}>
+                    </div>
+                `).join("")}
+    
+                <div class="mb-3">
+                    <label>Correct Answer</label>
+                    <select name="correct_answer_${i}" class="form-select" required>
+                        ${["A","B","C","D","E"].map(l => `<option value="${l}">${l}</option>`).join("")}
+                    </select>
+                </div>
+    
+                <div class="text-end">
+                    <button type="button" class="btn btn-sm btn-outline-primary"
+                        onclick="addSimilarQuestion(${i})">
+                        ➕ Add question under the same subject/topic
+                    </button>
+                </div>
+            `;
+    
+            container.appendChild(block);
+    
+            // Populate subjects
+            const menu = document.getElementById(`subjectsDropdownMenu_${i}`);
+            Object.keys(preset.subjectsObj).forEach(sub => {
+                const checked = preset.subjects.includes(sub);
+                const div = document.createElement("div");
+                div.className = "form-check ms-2";
+                div.innerHTML = `
+                    <input class="form-check-input" type="checkbox"
+                        value="${sub}" ${checked ? "checked" : ""}>
+                    <label class="form-check-label">${sub}</label>
+                `;
+                menu.appendChild(div);
+    
+                div.querySelector("input").addEventListener("change", () => {
+                    const selected = Array.from(menu.querySelectorAll("input:checked"))
+                        .map(i => i.value);
+    
+                    document.getElementById(`subjectsDropdown_${i}`).innerText =
+                        selected.length ? selected.join(", ") : "Select Subjects";
+    
+                    block.querySelectorAll(`input[name="subjects_${i}[]"]`).forEach(e => e.remove());
+                    selected.forEach(s => {
+                        const h = document.createElement("input");
+                        h.type = "hidden";
+                        h.name = `subjects_${i}[]`;
+                        h.value = s;
+                        block.appendChild(h);
+                    });
+    
+                    updateTopics(i, selected, preset.subjectsObj, preset.topic);
+                });
+            });
+    
+            updateTopics(i, preset.subjects, preset.subjectsObj, preset.topic);
+        }
+    
+        function updateTopics(i, subjects, subjectsObj, selectedTopic = "") {
+            const select = document.querySelector(`select[name="topic_${i}"]`);
+            select.innerHTML = `<option value="">--Select Topic--</option>`;
+            subjects.forEach(sub => {
+                subjectsObj[sub].forEach(topic => {
+                    const opt = new Option(topic, topic);
+                    if (topic === selectedTopic) opt.selected = true;
+                    select.add(opt);
+                });
+            });
+        }
+    
+        window.generateQuestionFields = function() {
+            const container = document.getElementById("questionsContainer");
+            container.innerHTML = "";
+    
+            const numQuestions = parseInt(document.getElementById("numQuestions").value);
+            const selectedBoardExams = Array.from(
+                document.querySelectorAll('input[name="board_exam_checkbox"]:checked')
+            ).map(cb => cb.value);
+    
+            if (!numQuestions || !selectedBoardExams.length) {
+                alert("Select board exam and number of questions");
+                return;
+            }
+    
+            let subjectsObj = {};
+            selectedBoardExams.forEach(exam => {
+                Object.assign(subjectsObj, BOARD_EXAM_TOPICS[exam] || {});
+            });
+    
+            currentQuestionIndex = 0;
+            for (let n = 0; n < numQuestions; n++) {
+                currentQuestionIndex++;
+                createQuestionBlock(currentQuestionIndex, {
+                    boardExams: selectedBoardExams,
+                    subjectsObj,
+                    subjects: [],
+                    topic: "",
+                    level: LEVELS[0]
+                });
+            }
+    
+            document.querySelector(".upload-button").style.display = "block";
+        };
+    
+        window.addSimilarQuestion = function(fromIndex) {
+            const source = document.querySelector(
+                `.question-block[data-index="${fromIndex}"]`
+            );
+
+            // Get existing values
+            const subjects = Array.from(
+                source.querySelectorAll(`input[name="subjects_${fromIndex}[]"]`)
+            ).map(i => i.value);
+
+            const topic = source.querySelector(
+                `select[name="topic_${fromIndex}"]`
+            ).value;
+
+            const level = source.querySelector(
+                `select[name="level_${fromIndex}"]`
+            ).value;
+
+            const boardExams = Array.from(
+                source.querySelectorAll(`input[name^="board_exam_"]`)
+            ).map(i => i.value);
+
+            // Create new question
+            currentQuestionIndex++;
+
+            createQuestionBlock(currentQuestionIndex, {
+                boardExams,
+                subjectsObj: (() => {
+                    let obj = {};
+                    boardExams.forEach(exam => {
+                        Object.assign(obj, BOARD_EXAM_TOPICS[exam] || {});
+                    });
+                    return obj;
+                })(),
+                subjects,
+                topic,
+                level
+            });
+
+            // 🔥 IMPORTANT FIXES START HERE
+            const newBlock = document.querySelector(
+                `.question-block[data-index="${currentQuestionIndex}"]`
+            );
+
+            // 1️⃣ Inject hidden subjects immediately (so validation passes)
+            subjects.forEach(sub => {
+                const hidden = document.createElement("input");
+                hidden.type = "hidden";
+                hidden.name = `subjects_${currentQuestionIndex}[]`;
+                hidden.value = sub;
+                newBlock.appendChild(hidden);
+            });
+
+            // 2️⃣ Force topic selection (satisfies required)
+            const topicSelect = newBlock.querySelector(
+                `select[name="topic_${currentQuestionIndex}"]`
+            );
+            if (topic) {
+                topicSelect.value = topic;
+            }
+
+            newBlock.scrollIntoView({ behavior: "smooth" });
+        };
+    });
+    </script>
+    
+
+</body>
+</html>
