@@ -1,4 +1,3 @@
-# Base image
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -25,5 +24,4 @@ RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8080
 
-# Run entrypoint at container start
 ENTRYPOINT ["/app/entrypoint.sh"]
