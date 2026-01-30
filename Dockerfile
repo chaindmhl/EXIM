@@ -1,11 +1,11 @@
 # Use lightweight Python image
 FROM python:3.11-slim
 
-# Environment variables
+# Environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Set work directory
+# Work directory
 WORKDIR /app
 
 # Install system dependencies
@@ -18,13 +18,14 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project
+# Copy project files
 COPY . .
 
 # -----------------------------
-# Temporary SECRET_KEY for collectstatic
+# TEMP SECRET_KEY for build
 # -----------------------------
-ENV DJANGO_SECRET_KEY="temporary_build_key_for_collectstatic"
+# This ensures Django can load apps like auth during collectstatic
+ENV DJANGO_SECRET_KEY="temporary_build_key_for_build"
 
 # Collect static files
 RUN python manage.py collectstatic --noinput
@@ -33,7 +34,6 @@ RUN python manage.py collectstatic --noinput
 EXPOSE 8080
 
 # -----------------------------
-# Run with Gunicorn at runtime
-# Cloud Run will override DJANGO_SECRET_KEY with the real secret
+# Runtime: Cloud Run injects real SECRET_KEY
 # -----------------------------
 CMD ["gunicorn", "Electronic_exam.wsgi:application", "--bind", "0.0.0.0:8080"]
