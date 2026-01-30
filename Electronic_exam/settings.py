@@ -2,27 +2,22 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env only if it exists (for local dev)
-env_path = Path(__file__).resolve().parent.parent / ".env"
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load local .env for development
+env_path = BASE_DIR / ".env"
 if env_path.exists():
     load_dotenv(env_path)
-
-BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --------------------------
 # SECURITY
 # --------------------------
-
-# Use environment variable first, fallback to a temporary key (for Docker build)
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "temporary_build_key_for_build")
-
-# DEBUG: True locally via .env, False in Cloud Run
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
 
 # --------------------------
-# ALLOWED HOSTS
+# HOSTS
 # --------------------------
-# Split comma-separated env variable into list
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 # --------------------------
@@ -42,7 +37,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    "whitenoise.middleware.WhiteNoiseMiddleware",  # serve static in production
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -110,8 +105,6 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
-
-# WhiteNoise: serve static files efficiently
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # --------------------------
