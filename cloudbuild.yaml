@@ -20,8 +20,14 @@ steps:
         '--allow-unauthenticated',
         '--port', '8080',
         '--set-env-vars',
-        'DJANGO_SECRET_KEY=django-insecure-t&ri-woq=wx@da@jwe%#soj(9ri9un%b@yzx3aq!m@g#q-*@n1,DEBUG=True,ALLOWED_HOSTS=exim-142442460469.asia-southeast1.run.app,OPENAI_API_KEY=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',
+        'DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY,DEBUG=$_DEBUG,ALLOWED_HOSTS=$_ALLOWED_HOSTS,OPENAI_API_KEY=$_OPENAI_API_KEY',
       ]
+      
+substitutions:
+  _DJANGO_SECRET_KEY: 'django-insecure-t&ri-woq=wx@da@jwe%#soj(9ri9un%b@yzx3aq!m@g#q-*@n1'
+  _DEBUG: 'False'
+  _ALLOWED_HOSTS: 'exim-142442460469.asia-southeast1.run.app'
+  _OPENAI_API_KEY: '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'
 
 images:
   - 'gcr.io/$PROJECT_ID/electronic_exam'
