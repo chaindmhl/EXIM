@@ -14,17 +14,13 @@ steps:
       - '--rm'
       - '-e'
       - 'DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY'
-      - '-e'
-      - 'DEBUG=False'
-      - '-e'
-      - 'ALLOWED_HOSTS=your-cloud-run-url'
-      - '-e'
-      - 'OPENAI_API_KEY=$OPENAI_API_KEY'
+      ...
       - 'gcr.io/$PROJECT_ID/electronic_exam'
       - 'python'
       - 'manage.py'
       - 'collectstatic'
       - '--noinput'
+
 
   # Step 4: Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
