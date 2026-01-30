@@ -75,6 +75,9 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 #         'PORT': os.environ.get("POSTGRES_PORT", "5432"),
 #     }
 # }
+# settings.py
+ALLOWED_HOSTS = ['exim-142442460469.asia-southeast1.run.app', '.run.app']
+
 
 DATABASES = {
     'default': {
