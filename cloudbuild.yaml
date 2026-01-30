@@ -1,26 +1,23 @@
 steps:
-  # Step 1: Build the Docker image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/electronic_exam', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/electronic_exam', '.']
 
-  # Step 2: Push the Docker image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/electronic_exam']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/electronic_exam']
 
-  # Step 3: Deploy to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      [
-        'run', 'deploy', 'electronic-exam',
-        '--image', 'gcr.io/$PROJECT_ID/electronic_exam',
-        '--platform', 'managed',
-        '--region', 'asia-southeast1',
-        '--allow-unauthenticated',
-        '--port', '8080',
-        '--set-env-vars',
-        'DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY,DEBUG=False,ALLOWED_HOSTS=exim-142442460469.asia-southeast1.run.app,OPENAI_API_KEY=$OPENAI_API_KEY'
-      ]
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args:
+    [
+      'run', 'deploy', 'electronic-exam',
+      '--image', 'gcr.io/$PROJECT_ID/electronic_exam',
+      '--platform', 'managed',
+      '--region', 'asia-southeast1',
+      '--allow-unauthenticated',
+      '--port', '8080',
+      '--set-env-vars',
+      'DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY,DEBUG=False,ALLOWED_HOSTS=exim-142442460469.asia-southeast1.run.app,OPENAI_API_KEY=$OPENAI_API_KEY'
+    ]
 
 images:
   - 'gcr.io/$PROJECT_ID/electronic_exam'
