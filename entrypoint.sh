@@ -16,13 +16,16 @@ python manage.py collectstatic --noinput
 # Safe superuser creation for CustomUser (email-based)
 if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
   echo "Checking if superuser exists..."
-  python manage.py shell -c "from django.contrib.auth import get_user_model; \
-User = get_user_model(); \
-email = '$DJANGO_SUPERUSER_EMAIL'; \
-if not User.objects.filter(email=email).exists(): \
-    print('Creating superuser', email); \
-    User.objects.create_superuser(email=email, password='$DJANGO_SUPERUSER_PASSWORD'); \
-else: print('Superuser', email, 'already exists')"
+  python manage.py shell <<END
+from django.contrib.auth import get_user_model
+User = get_user_model()
+email = "$DJANGO_SUPERUSER_EMAIL"
+if not User.objects.filter(email=email).exists():
+    print("Creating superuser", email)
+    User.objects.create_superuser(email=email, password="$DJANGO_SUPERUSER_PASSWORD")
+else:
+    print("Superuser", email, "already exists")
+END
 else
   echo "Superuser environment variables not fully set, skipping superuser creation"
 fi
