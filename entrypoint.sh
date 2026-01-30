@@ -7,16 +7,25 @@ if [ -z "$DJANGO_SECRET_KEY" ]; then
   exit 1
 fi
 
+echo "Applying database migrations..."
+python manage.py migrate --noinput
+
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-echo "Creating superuser if it doesn't exist..."
-python manage.py shell -c "from django.contrib.auth import get_user_model; import os; \
+# Safe superuser creation
+if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
+  echo "Checking if superuser exists..."
+  python manage.py shell -c "from django.contrib.auth import get_user_model; \
 User = get_user_model(); \
-username = os.environ.get('DJANGO_SUPERUSER_USERNAME', 'admin'); \
-email = os.environ.get('DJANGO_SUPERUSER_EMAIL', 'admin@example.com'); \
-password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', 'adminpass'); \
-User.objects.filter(username=username).exists() or User.objects.create_superuser(username, email, password)"
+username = '$DJANGO_SUPERUSER_USERNAME'; \
+if not User.objects.filter(username=username).exists(): \
+    print('Creating superuser', username); \
+    User.objects.create_superuser(username=username, email='$DJANGO_SUPERUSER_EMAIL', password='$DJANGO_SUPERUSER_PASSWORD'); \
+else: print('Superuser', username, 'already exists')"
+else
+  echo "Superuser environment variables not fully set, skipping superuser creation"
+fi
 
 echo "Starting Gunicorn..."
 exec gunicorn Electronic_exam.wsgi:application --bind 0.0.0.0:8080
