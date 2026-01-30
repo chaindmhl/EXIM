@@ -1,4 +1,5 @@
 #!/bin/sh
+
 # Fail fast if SECRET_KEY is not set
 if [ -z "$DJANGO_SECRET_KEY" ]; then
   echo "ERROR: DJANGO_SECRET_KEY is not set"
