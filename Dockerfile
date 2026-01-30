@@ -6,6 +6,18 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# Build-time environment variables
+ARG DJANGO_SECRET_KEY
+ARG DEBUG
+ARG ALLOWED_HOSTS
+ARG OPENAI_API_KEY
+
+# Set them as runtime env variables
+ENV DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY
+ENV DEBUG=$DEBUG
+ENV ALLOWED_HOSTS=$ALLOWED_HOSTS
+ENV OPENAI_API_KEY=$OPENAI_API_KEY
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
