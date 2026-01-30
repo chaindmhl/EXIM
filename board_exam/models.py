@@ -6,6 +6,11 @@ from PIL import Image
 from io import BytesIO
 from .config import BOARD_EXAM_TOPICS, LEVELS
 from django.contrib.auth import get_user_model
+import os, django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Electronic_exam.settings")
+django.setup()
+
 
 
 def get_board_exam_choices():
