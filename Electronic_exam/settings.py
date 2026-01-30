@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,13 +22,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-t&ri-woq=wx@da@jwe%#soj(9ri9un%b@yzx3aq!m@g#q-*@n1'
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = os.environ.get("DEBUG") == "True"
 
 HOST = "10.101.60.142"
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0','10.101.60.143', '192.168.5.53', '192.168.5.56', '192.168.5.55', HOST, '*']
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
 
 
 # Application definition
@@ -96,11 +97,11 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'electronic_board',
-        'USER': 'postgres',
-        'PASSWORD': 'Engineering',
-        'HOST': 'db',  # this must match the service name in docker-compose.yml
-        'PORT': '5432',  # internal port of the container
+        'NAME': os.environ.get("POSTGRES_DB"),
+        'USER': os.environ.get("POSTGRES_USER"),
+        'PASSWORD': os.environ.get("POSTGRES_PASSWORD"),
+        'HOST': os.environ.get("POSTGRES_HOST"),
+        'PORT': os.environ.get("POSTGRES_PORT", 5432),
     }
 }
 
