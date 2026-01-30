@@ -13,16 +13,16 @@ python manage.py migrate --noinput
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
-# Safe superuser creation
-if [ -n "$DJANGO_SUPERUSER_USERNAME" ] && [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
+# Safe superuser creation for CustomUser (email-based)
+if [ -n "$DJANGO_SUPERUSER_EMAIL" ] && [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
   echo "Checking if superuser exists..."
   python manage.py shell -c "from django.contrib.auth import get_user_model; \
 User = get_user_model(); \
-username = '$DJANGO_SUPERUSER_USERNAME'; \
-if not User.objects.filter(username=username).exists(): \
-    print('Creating superuser', username); \
-    User.objects.create_superuser(username=username, email='$DJANGO_SUPERUSER_EMAIL', password='$DJANGO_SUPERUSER_PASSWORD'); \
-else: print('Superuser', username, 'already exists')"
+email = '$DJANGO_SUPERUSER_EMAIL'; \
+if not User.objects.filter(email=email).exists(): \
+    print('Creating superuser', email); \
+    User.objects.create_superuser(email=email, password='$DJANGO_SUPERUSER_PASSWORD'); \
+else: print('Superuser', email, 'already exists')"
 else
   echo "Superuser environment variables not fully set, skipping superuser creation"
 fi
