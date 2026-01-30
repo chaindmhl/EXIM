@@ -72,6 +72,16 @@ DATABASES = {
         'PORT': os.environ.get("POSTGRES_PORT", "5432"),
     }
 }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME', 'electronic_board'),
+        'USER': os.environ.get('DB_USER', 'admin'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
+        'HOST': os.environ.get('DB_HOST', '/cloudsql/concrete-potion-477505-p2:asia-southeast1:exim-db'),
+        'PORT': '5432',
+    }
+}
 
 
 # --------------------------
