@@ -13,6 +13,9 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost").split(",")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
+AUTH_USER_MODEL = 'board_exam.CustomUser'
+
+
 # --------------------------
 # APPLICATION DEFINITION
 # --------------------------
