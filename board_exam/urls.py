@@ -10,7 +10,7 @@ from django.views.static import serve
 router = DefaultRouter()
 
 urlpatterns = [
-    path('', include(router.urls)),
+    path('', views.home, name='home'), 
     path('signup/', views.signup, name='signup'),
     path('home/', views.home, name='home'),
     path('home_student/', views.home_student, name='home_student'),
