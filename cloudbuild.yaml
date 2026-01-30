@@ -7,7 +7,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/electronic_exam']
 
-  # Step 3: Deploy to Cloud Run
+  # Step 3: Deploy to Cloud Run (runtime env vars)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
