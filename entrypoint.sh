@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e
+set -e  # Exit on any error
 
 # Fail fast if SECRET_KEY is not set
 if [ -z "$DJANGO_SECRET_KEY" ]; then
@@ -7,19 +7,15 @@ if [ -z "$DJANGO_SECRET_KEY" ]; then
   exit 1
 fi
 
-# Optional: export runtime environment vars
+# Export runtime env vars for Django
 export DJANGO_SECRET_KEY
 export DEBUG=${DEBUG:-False}
 export ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost}
 
-# Make migrations (optional, can remove in production)
-python manage.py makemigrations
-python manage.py migrate
-
-# Collect static files
+# Runtime collectstatic
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
 # Start Gunicorn
 echo "Starting Gunicorn..."
-exec gunicorn Electronic_exam.wsgi:application --bind 0.0.0.0:8080 --workers 3
+exec gunicorn Electronic_exam.wsgi:application --bind 0.0.0.0:8080
