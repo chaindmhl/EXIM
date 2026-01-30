@@ -1,19 +1,17 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Load local .env for development
-env_path = BASE_DIR / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
 
 # --------------------------
 # SECURITY
 # --------------------------
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "temporary_build_key_for_build")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("DJANGO_SECRET_KEY environment variable is not set!")
+
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
+
 
 # --------------------------
 # HOSTS
@@ -72,13 +70,14 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get("POSTGRES_DB", "postgres"),
-        'USER': os.environ.get("POSTGRES_USER", "postgres"),
-        'PASSWORD': os.environ.get("POSTGRES_PASSWORD", ""),
-        'HOST': os.environ.get("POSTGRES_HOST", "localhost"),
+        'NAME': os.environ.get("POSTGRES_DB"),
+        'USER': os.environ.get("POSTGRES_USER"),
+        'PASSWORD': os.environ.get("POSTGRES_PASSWORD"),
+        'HOST': os.environ.get("POSTGRES_HOST"),
         'PORT': os.environ.get("POSTGRES_PORT", "5432"),
     }
 }
+
 
 # --------------------------
 # PASSWORD VALIDATION
