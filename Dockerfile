@@ -1,33 +1,31 @@
-# Use the official Python image as a base image
-FROM python:3.9
+# Use lightweight Python image
+FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Add this line to include /app in Python’s module search path
-ENV PYTHONPATH="${PYTHONPATH}:/app"
-
-# Set the working directory in the container
+# Set work directory
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt /app/
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libglib2.0-0 \
+    libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
 
+# Copy project
+COPY . .
 
-# Copy the rest of the application code
-COPY . /app/
+# Collect static files
+RUN python manage.py collectstatic --noinput
 
-# Create static and media directories (important)
-RUN mkdir -p /app/staticfiles /app/media
+# Cloud Run listens on 8080
+EXPOSE 8080
 
-# Optional: collect static files if you use them
-RUN python manage.py collectstatic --noinput || true
-
-# Expose the desired port
-EXPOSE 9000
-
-# Run the Django application
-CMD ["python", "manage.py", "runserver", "0.0.0.0:9000"]
+# Run with Gunicorn
+CMD ["gunicorn", "Electronic_exam.wsgi:application", "--bind", "0.0.0.0:8080"]
