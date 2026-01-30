@@ -5,7 +5,7 @@ if [ -z "$DJANGO_SECRET_KEY" ]; then
   exit 1
 fi
 
-# Collect static files
+# Collect static files at runtime
 python manage.py collectstatic --noinput
 
 # Run Gunicorn
