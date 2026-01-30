@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # --------------------------
 
 # Use environment variable first, fallback to a temporary key (for Docker build)
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "temporary_build_key_for_collectstatic")
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "temporary_build_key_for_build")
 
 # DEBUG: True locally via .env, False in Cloud Run
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
