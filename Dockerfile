@@ -1,39 +1,28 @@
-# Use lightweight Python image
+# Base image
 FROM python:3.11-slim
 
-# Environment variables for Python
+# Python env
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Work directory
+# Workdir
 WORKDIR /app
 
-# Install system dependencies
+# System dependencies
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
+# Copy project
 COPY . .
 
-# -----------------------------
-# TEMP SECRET_KEY for build
-# -----------------------------
-# This ensures Django can load apps like auth during collectstatic
-ENV DJANGO_SECRET_KEY="temporary_build_key_for_build"
-
-# Collect static files
-RUN python manage.py collectstatic --noinput
-
-# Cloud Run listens on 8080
+# Expose Cloud Run port
 EXPOSE 8080
 
-# -----------------------------
-# Runtime: Cloud Run injects real SECRET_KEY
-# -----------------------------
-CMD ["gunicorn", "Electronic_exam.wsgi:application", "--bind", "0.0.0.0:8080"]
+# Collect static + run Gunicorn at start
+CMD ["sh", "-c", "python manage.py collectstatic --noinput && gunicorn Electronic_exam.wsgi:application --bind 0.0.0.0:8080"]
