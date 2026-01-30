@@ -4,17 +4,12 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env if exists
-load_dotenv(os.path.join(BASE_DIR, '.env'))
-
-# Security
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY environment variable is not set!")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
-
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost").split(",")
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
