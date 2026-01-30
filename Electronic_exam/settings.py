@@ -9,7 +9,8 @@ if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY environment variable is not set!")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost").split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "exim-142442460469.asia-southeast1.run.app,.run.app").split(",")
+
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -75,8 +76,6 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 #         'PORT': os.environ.get("POSTGRES_PORT", "5432"),
 #     }
 # }
-# settings.py
-ALLOWED_HOSTS = ['exim-142442460469.asia-southeast1.run.app', '.run.app']
 
 
 DATABASES = {
