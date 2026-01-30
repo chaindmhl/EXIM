@@ -1,3 +1,4 @@
+# cloudbuild.yaml
 steps:
   # Step 1: Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
@@ -7,22 +8,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/electronic_exam']
 
-  # Step 3: Run collectstatic inside the image (temporary container)
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'run'
-      - '--rm'
-      - '-e'
-      - 'DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY'
-      ...
-      - 'gcr.io/$PROJECT_ID/electronic_exam'
-      - 'python'
-      - 'manage.py'
-      - 'collectstatic'
-      - '--noinput'
-
-
-  # Step 4: Deploy to Cloud Run
+  # Step 3: Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -32,7 +18,9 @@ steps:
         '--platform', 'managed',
         '--region', 'asia-southeast1',
         '--allow-unauthenticated',
-        '--port', '8080'
+        '--port', '8080',
+        '--set-env-vars',
+        'DJANGO_SECRET_KEY=django-insecure-t&ri-woq=wx@daafsgrhgreh@jwe%#soj(9ri9un%b@yreherhertghreh6zx3aq!m@g#q-*@n1,DEBUG=True,ALLOWED_HOSTS=boardmate-production-13bc.up.railway.app,OPENAI_API_KEY=sk-svcacct-...',
       ]
 
 images:
