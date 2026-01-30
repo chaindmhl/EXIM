@@ -6,15 +6,6 @@ from PIL import Image
 from io import BytesIO
 from .config import BOARD_EXAM_TOPICS, LEVELS
 from django.contrib.auth import get_user_model
-import os, django
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Electronic_exam.settings")
-django.setup()
-
-# check/create superuser safely
-User = get_user_model()
-if not User.objects.filter(is_superuser=True).exists():
-    User.objects.create_superuser("admin", "admin@example.com", "admin@03")
 
 def get_board_exam_choices():
     return [(exam, exam) for exam in BOARD_EXAM_TOPICS.keys()]
