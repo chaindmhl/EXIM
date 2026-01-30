@@ -21,11 +21,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project
 COPY . .
 
+# Temporary SECRET_KEY for build
+ENV DJANGO_SECRET_KEY="temporary_build_key_for_collectstatic"
+
 # Collect static files
 RUN python manage.py collectstatic --noinput
 
 # Cloud Run listens on 8080
 EXPOSE 8080
 
-# Run with Gunicorn
+# Run with Gunicorn (runtime SECRET_KEY will override this)
 CMD ["gunicorn", "Electronic_exam.wsgi:application", "--bind", "0.0.0.0:8080"]
