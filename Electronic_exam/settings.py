@@ -80,16 +80,22 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 # }
 
 
+db_host = os.environ.get("DB_HOST")
+
+if db_host and not db_host.startswith("/cloudsql/"):
+    db_host = f"/cloudsql/{db_host}"
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME'),
         'USER': os.environ.get('DB_USER'),
         'PASSWORD': os.environ.get('DB_PASSWORD'),
-        'HOST': os.environ.get('DB_HOST'),  # /cloudsql/... 
+        'HOST': db_host,
         'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
+
 
 
 
