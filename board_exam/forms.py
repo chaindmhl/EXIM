@@ -2,7 +2,11 @@ from django import forms
 from board_exam.models import CustomUser, Question, Choice, QuestionImage, Teacher, Student # Import your custom user model
 from django.contrib.auth.hashers import make_password
 from django.forms import inlineformset_factory
+from django.contrib.auth.forms import AuthenticationForm
 
+
+class EmailAuthenticationForm(AuthenticationForm):
+    username = forms.EmailField(label='Email', max_length=254)
 
 class SignUpForm(forms.ModelForm):
     role = forms.ChoiceField(choices=(('teacher', 'Teacher'), ('student', 'Student')))
