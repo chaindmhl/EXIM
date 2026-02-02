@@ -14,3 +14,5 @@ openai
 gunicorn
 whitenoise
 python-dotenv
+gunicorn>=20.1
+
