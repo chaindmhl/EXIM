@@ -16,7 +16,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 AUTH_USER_MODEL = 'board_exam.CustomUser'
 
 LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/home/'  # optional, where users go after login
+LOGIN_REDIRECT_URL = '/login/'  # optional, where users go after login
 
 
 # --------------------------
