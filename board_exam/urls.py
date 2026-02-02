@@ -11,7 +11,7 @@ router = DefaultRouter()
 
 urlpatterns = [
     # Root goes to home
-    path('', views.login, name='login'),
+    path('', views.home, name='home'),
 
     # Authentication / user
     path('signup/', views.signup, name='signup'),
