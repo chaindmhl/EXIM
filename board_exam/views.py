@@ -102,15 +102,15 @@ def login_view(request):
     if request.method == 'POST':
         form = EmailAuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            email = form.cleaned_data.get('username')  # email field
+            email = form.cleaned_data.get('username')  # actually email
             password = form.cleaned_data.get('password')
             user = authenticate(request, username=email, password=password)
-            if user is not None:
+            if user:
                 login(request, user)
                 if user.is_staff:
-                    return redirect('home')          # Teacher dashboard
+                    return redirect('home')           # teacher
                 else:
-                    return redirect('home_student')  # Student dashboard
+                    return redirect('home_student')   # student
             else:
                 messages.error(request, 'Invalid email or password.')
         else:
