@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install gunicorn
+    pip install gunicorn python-dotenv
 
 # Copy project code
 COPY . .
@@ -30,7 +30,7 @@ COPY . .
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Cloud Run listens on $PORT
+# Expose port for Cloud Run
 EXPOSE 8080
 
 # Use entrypoint
