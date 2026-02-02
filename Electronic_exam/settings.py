@@ -88,14 +88,14 @@ if not DB_HOST:
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
         'NAME': os.environ.get('DB_NAME', 'electronic_board'),
         'USER': os.environ.get('DB_USER', 'admin'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
-        'HOST': f"/cloudsql/{DB_HOST}",
+        'HOST': f"/cloudsql/{DB_HOST}",  # Cloud SQL Unix socket
         'PORT': '5432',
     }
 }
+
 
 
 
