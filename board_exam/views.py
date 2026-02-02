@@ -100,27 +100,28 @@ def signup(request):
 
 def login_view(request):
     if request.method == 'POST':
-        form = AuthenticationForm(request, request.POST)
+        form = EmailAuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            username = form.cleaned_data.get('username')
+            email = form.cleaned_data.get('username')  # email field
             password = form.cleaned_data.get('password')
-            user = authenticate(request, username=username, password=password)
-            if user is not None and user.is_staff == True:
+            user = authenticate(request, username=email, password=password)
+            if user is not None:
                 login(request, user)
-                return redirect('home')  # Redirect to the home page after login
-            elif user is not None and user.is_staff == False:
-                login(request, user)
-                return redirect('home_student')  # Redirect to the home page after login
+                if user.is_staff:
+                    return redirect('home')          # Teacher dashboard
+                else:
+                    return redirect('home_student')  # Student dashboard
             else:
-                # Authentication failed
-                messages.error(request, 'Invalid username or password.')
+                messages.error(request, 'Invalid email or password.')
         else:
-            # Form is not valid
-            messages.error(request, 'Invalid form submission. Please try again.')
+            messages.error(request, 'Please correct the errors below.')
     else:
-        form = AuthenticationForm()
-
+        form = EmailAuthenticationForm()
     return render(request, 'login.html', {'form': form})
+
+def logout_view(request):
+    logout(request)
+    return redirect('login')
 ####################### FOR DASHBOARD ##############################
 
 def is_teacher(user):
