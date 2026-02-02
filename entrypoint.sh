@@ -6,9 +6,9 @@ MAX_ATTEMPTS=30
 SLEEP_TIME=3
 PORT="${PORT:-8080}"  # Cloud Run sets $PORT automatically
 
-export DJANGO_SETTINGS_MODULE=Electronic_exam.settings  # IMPORTANT: load settings
+echo "Starting container..."
 
-# === FUNCTION TO WAIT FOR DATABASE ===
+# === WAIT FOR DATABASE ===
 wait_for_db() {
   echo "Waiting for database..."
   attempts=0
@@ -16,12 +16,11 @@ wait_for_db() {
 import sys
 import os
 import django
-django.setup()
 from django.db import connections
+django.setup()
 try:
     connections['default'].cursor()
-except Exception as e:
-    print("Database connection failed:", e)
+except Exception:
     sys.exit(1)
 END
   do
@@ -36,9 +35,9 @@ END
   echo "Database is ready."
 }
 
-# === MAIN SCRIPT ===
 wait_for_db
 
+# === RUN MIGRATIONS & COLLECT STATIC FILES ===
 echo "Applying database migrations..."
 python manage.py makemigrations
 python manage.py migrate --noinput
@@ -63,5 +62,10 @@ else:
 END
 fi
 
+# === START GUNICORN ===
 echo "Starting Gunicorn..."
-exec gunicorn Electronic_exam.wsgi:application --bind 0.0.0.0:$PORT --workers 1
+exec gunicorn Electronic_exam.wsgi:application \
+    --bind 0.0.0.0:$PORT \
+    --workers 2 \
+    --threads 4 \
+    --timeout 0
