@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
     fonts-freefont-ttf \
     libglib2.0-0 \
     libgl1 \
+    wget \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 
