@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+SECRET_KEY = "django-insecure-t&ri-woq=wx@da@jwe%#soj(9ri9un%b@yzx3aq!m@g#q-*@n1"
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY environment variable is not set!")
 
@@ -15,6 +15,9 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "exim-142442460469.asia-southeas
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 AUTH_USER_MODEL = 'board_exam.CustomUser'
+
+LOGIN_URL = '/login/'
+
 
 
 # --------------------------
@@ -86,7 +89,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME', 'electronic_board'),
-        'USER': os.environ.get('DB_USER', 'admin'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
         'HOST': f"/cloudsql/{DB_HOST}",
         'PORT': '5432',

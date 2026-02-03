@@ -11,7 +11,7 @@ from scripts.check import detect_objects, sort_objects_by_distance, group_and_se
 from django.http import JsonResponse
 import numpy as np
 import cv2, time, os, json, base64, traceback
-from .forms import SignUpForm, ChoiceFormSet, ImageFormSet
+from .forms import loginpForm, ChoiceFormSet, ImageFormSet
 from django.contrib.auth import logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth import authenticate, login
@@ -58,6 +58,8 @@ logo_path = os.path.join(settings.BASE_DIR, 'static', 'EXIM2.png')  # full path
 
 ####################### FOR SIGNING UP ##############################
 
+from django.contrib.auth import login
+
 @csrf_protect
 def signup(request):
     if request.method == 'POST':
@@ -67,19 +69,13 @@ def signup(request):
             user = form.save(commit=False)
             user.is_active = True
             user.password = make_password(form.cleaned_data['password'])  # Hash the password
-            user.save()
 
-            # Determine role and create the related instance
+            # Determine role
             role = form.cleaned_data.get('role')
-            if role == 'teacher':
-                Teacher.objects.create(
-                    user=user,
-                    last_name=form.cleaned_data.get('last_name'),
-                    first_name=form.cleaned_data.get('first_name'),
-                    middle_name=form.cleaned_data.get('middle_name'),
-                    birthdate=form.cleaned_data.get('birthdate'),
-                )
-            elif role == 'student':
+            if role == 'student':
+                user.is_student = True  # <-- Automatically mark student
+                user.save()
+
                 course = form.cleaned_data.get('course')
                 Student.objects.create(
                     user=user,
@@ -90,43 +86,65 @@ def signup(request):
                     birthdate=form.cleaned_data.get('birthdate'),
                     course=course,
                 )
+            elif role == 'teacher':
+                user.is_student = False  # <-- Teacher is not student
+                user.save()
+
+                Teacher.objects.create(
+                    user=user,
+                    last_name=form.cleaned_data.get('last_name'),
+                    first_name=form.cleaned_data.get('first_name'),
+                    middle_name=form.cleaned_data.get('middle_name'),
+                    birthdate=form.cleaned_data.get('birthdate'),
+                )
             else:
                 raise ValidationError("Invalid role selected")
-        messages.success(request, "Account successfully signed up!")        
-        return redirect('login')
+
+            messages.success(request, "Account successfully signed up!")        
+            return redirect('login')
     else:
         form = SignUpForm()
     return render(request, 'signup.html', {'form': form})
 
+homhom
 def login_view(request):
     if request.method == 'POST':
-        form = AuthenticationForm(request, request.POST)
+        form = EmailAuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            username = form.cleaned_data.get('username')
-            password = form.cleaned_data.get('password')
-            user = authenticate(request, username=username, password=password)
-            if user is not None and user.is_staff == True:
+            user = authenticate(
+                request,
+                username=form.cleaned_data.get('username'),
+                password=form.cleaned_data.get('password')
+            )
+            if user:
                 login(request, user)
-                return redirect('home')  # Redirect to the home page after login
-            elif user is not None and user.is_staff == False:
-                login(request, user)
-                return redirect('home_student')  # Redirect to the home page after login
-            else:
-                # Authentication failed
-                messages.error(request, 'Invalid username or password.')
+                if is_teacher(user):
+                    return redirect('home')
+                elif is_student(user):
+                    return redirect('home_student')
+                else:
+                    logout(request)
+                    messages.error(request, "No role assigned.")
+                    return redirect('login')
+            messages.error(request, "Invalid email or password.")
         else:
-            # Form is not valid
-            messages.error(request, 'Invalid form submission. Please try again.')
+            messages.error(request, "Please correct the errors below.")
     else:
-        form = AuthenticationForm()
-
+        form = EmailAuthenticationForm()
     return render(request, 'login.html', {'form': form})
+
+
+def logout_view(request):
+    logout(request)
+    return redirect('login')
 ####################### FOR DASHBOARD ##############################
 
 def is_teacher(user):
-    # Assuming you have a profile field in your User model indicating the user's role
-    # This function checks if the user's profile indicates they are a teacher
-    return user.profile.role == 'teacher'
+    return hasattr(user, 'teacher') and user.is_staff
+
+def is_student(user):
+    return hasattr(user, 'student') and user.is_student
+
 
 @login_required
 def main_dashboard(request):
@@ -138,13 +156,39 @@ def main_dashboard(request):
     else:
         return redirect('login')  # Redirect to login page if user is not authenticated
 
+from django.http import HttpResponseForbidden
+
+from django.http import HttpResponseForbidden
+
 @login_required
 def home(request):
-    return render(request, 'home.html')  # Corrected template name
+    # Only allow teachers/staff
+    if not request.user.is_staff and not hasattr(request.user, 'teacher'):
+        return HttpResponseForbidden("You cannot access this page")
+    return render(request, 'home.html')
 
 @login_required
 def home_student(request):
-    return render(request, 'home_student.html')  # Corrected template name
+    # Only allow students
+    if not hasattr(request.user, 'student'):
+        return HttpResponseForbidden("You cannot access this page")
+    return render(request, 'home_student.html')
+
+
+def root_redirect(request):
+    """Redirect users to the correct dashboard based on role"""
+    if not request.user.is_authenticated:
+        return redirect('login')  # Not logged in → login page
+
+    # Check user role
+    if request.user.is_staff and hasattr(request.user, 'teacher'):
+        return redirect('home')  # Teacher/admin
+    elif hasattr(request.user, 'student'):
+        return redirect('home_student')  # Student
+    else:
+        # Optional: fallback for logged-in users with no role
+        return redirect('login')
+
 
 @login_required
 def student_dashboard(request):

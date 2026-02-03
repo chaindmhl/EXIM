@@ -77,110 +77,121 @@ form { max-width: 900px; margin:0 auto 50px; }
         let currentQuestionIndex = 0;
     
         function createQuestionBlock(i, preset = null) {
-            const container = document.getElementById("questionsContainer");
-            const block = document.createElement("div");
-            block.classList.add("question-block");
-            block.dataset.index = i;
-    
-            let difficultyOptions = LEVELS.map(
-                lvl => `<option value="${lvl}" ${preset?.level === lvl ? "selected" : ""}>${lvl}</option>`
-            ).join("");
-    
-            let boardExamInputs = preset.boardExams.map(exam =>
-                `<input type="hidden" name="board_exam_${i}" value="${exam}">`
-            ).join("");
-    
-            block.innerHTML = `
-                ${boardExamInputs}
-                <h5>Question ${i}</h5>
-    
-                <textarea name="question_text_${i}" class="form-control mb-3"
-                    rows="2" placeholder="Enter question text..." required></textarea>
-    
-                <div class="mb-3">
-                    <label>Subjects</label>
-                    <div class="dropdown">
-                        <button class="btn btn-outline-secondary dropdown-toggle w-100"
-                            type="button" id="subjectsDropdown_${i}" data-bs-toggle="dropdown">
-                            ${preset.subjects.length ? preset.subjects.join(", ") : "Select Subject(s)"}
+                const container = document.getElementById("questionsContainer");
+                const block = document.createElement("div");
+                block.classList.add("question-block");
+                block.dataset.index = i;
+
+                // Difficulty options
+                let difficultyOptions = LEVELS.map(
+                    lvl => `<option value="${lvl}" ${preset?.level === lvl ? "selected" : ""}>${lvl}</option>`
+                ).join("");
+
+                // Hidden board exam inputs
+                let boardExamInputs = preset.boardExams.map(exam =>
+                    `<input type="hidden" name="board_exam_${i}" value="${exam}">`
+                ).join("");
+
+                // Block HTML
+                block.innerHTML = `
+                    ${boardExamInputs}
+                    <h5>Question ${i}</h5>
+
+                    <textarea name="question_text_${i}" class="form-control mb-3"
+                        rows="2" placeholder="Enter question text..." required></textarea>
+
+                    <div class="mb-3">
+                        <label>Upload Image (optional)</label>
+                        <input type="file" name="image_${i}" class="form-control">
+                    </div>
+
+                    <div class="mb-3">
+                        <label>Subjects</label>
+                        <div class="dropdown">
+                            <button class="btn btn-outline-secondary dropdown-toggle w-100"
+                                type="button" id="subjectsDropdown_${i}" data-bs-toggle="dropdown">
+                                ${preset.subjects.length ? preset.subjects.join(", ") : "Select Subject(s)"}
+                            </button>
+                            <ul class="dropdown-menu w-100 p-2"
+                                id="subjectsDropdownMenu_${i}" style="max-height:200px;overflow-y:auto;"></ul>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label>Topic</label>
+                        <select name="topic_${i}" class="form-select" required></select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label>Difficulty</label>
+                        <select name="level_${i}" class="form-select" required>
+                            ${difficultyOptions}
+                        </select>
+                    </div>
+
+                    ${["A","B","C","D","E"].map(letter => `
+                        <div class="input-group mb-1">
+                            <span class="input-group-text">${letter}.</span>
+                            <input type="text" class="form-control"
+                                name="choice${letter}_${i}" ${letter !== "E" ? "required" : ""}>
+                        </div>
+                    `).join("")}
+
+                    <div class="mb-3">
+                        <label>Correct Answer</label>
+                        <select name="correct_answer_${i}" class="form-select" required>
+                            ${["A","B","C","D","E"].map(l => `<option value="${l}">${l}</option>`).join("")}
+                        </select>
+                    </div>
+
+                    <div class="text-end">
+                        <button type="button" class="btn btn-sm btn-outline-primary"
+                            onclick="addSimilarQuestion(${i})">
+                            ➕ Add question under the same subject/topic
                         </button>
-                        <ul class="dropdown-menu w-100 p-2"
-                            id="subjectsDropdownMenu_${i}" style="max-height:200px;overflow-y:auto;"></ul>
                     </div>
-                </div>
-    
-                <div class="mb-3">
-                    <label>Topic</label>
-                    <select name="topic_${i}" class="form-select" required></select>
-                </div>
-    
-                <div class="mb-3">
-                    <label>Difficulty</label>
-                    <select name="level_${i}" class="form-select" required>
-                        ${difficultyOptions}
-                    </select>
-                </div>
-    
-                ${["A","B","C","D","E"].map(letter => `
-                    <div class="input-group mb-1">
-                        <span class="input-group-text">${letter}.</span>
-                        <input type="text" class="form-control"
-                            name="choice${letter}_${i}" ${letter !== "E" ? "required" : ""}>
-                    </div>
-                `).join("")}
-    
-                <div class="mb-3">
-                    <label>Correct Answer</label>
-                    <select name="correct_answer_${i}" class="form-select" required>
-                        ${["A","B","C","D","E"].map(l => `<option value="${l}">${l}</option>`).join("")}
-                    </select>
-                </div>
-    
-                <div class="text-end">
-                    <button type="button" class="btn btn-sm btn-outline-primary"
-                        onclick="addSimilarQuestion(${i})">
-                        ➕ Add question under the same subject/topic
-                    </button>
-                </div>
-            `;
-    
-            container.appendChild(block);
-    
-            // Populate subjects
-            const menu = document.getElementById(`subjectsDropdownMenu_${i}`);
-            Object.keys(preset.subjectsObj).forEach(sub => {
-                const checked = preset.subjects.includes(sub);
-                const div = document.createElement("div");
-                div.className = "form-check ms-2";
-                div.innerHTML = `
-                    <input class="form-check-input" type="checkbox"
-                        value="${sub}" ${checked ? "checked" : ""}>
-                    <label class="form-check-label">${sub}</label>
                 `;
-                menu.appendChild(div);
-    
-                div.querySelector("input").addEventListener("change", () => {
-                    const selected = Array.from(menu.querySelectorAll("input:checked"))
-                        .map(i => i.value);
-    
-                    document.getElementById(`subjectsDropdown_${i}`).innerText =
-                        selected.length ? selected.join(", ") : "Select Subjects";
-    
-                    block.querySelectorAll(`input[name="subjects_${i}[]"]`).forEach(e => e.remove());
-                    selected.forEach(s => {
-                        const h = document.createElement("input");
-                        h.type = "hidden";
-                        h.name = `subjects_${i}[]`;
-                        h.value = s;
-                        block.appendChild(h);
+
+                container.appendChild(block);
+
+                // Populate subjects
+                const menu = document.getElementById(`subjectsDropdownMenu_${i}`);
+                Object.keys(preset.subjectsObj).forEach(sub => {
+                    const checked = preset.subjects.includes(sub);
+                    const div = document.createElement("div");
+                    div.className = "form-check ms-2";
+                    div.innerHTML = `
+                        <input class="form-check-input" type="checkbox"
+                            value="${sub}" ${checked ? "checked" : ""}>
+                        <label class="form-check-label">${sub}</label>
+                    `;
+                    menu.appendChild(div);
+
+                    div.querySelector("input").addEventListener("change", () => {
+                        const selected = Array.from(menu.querySelectorAll("input:checked"))
+                            .map(i => i.value);
+
+                        document.getElementById(`subjectsDropdown_${i}`).innerText =
+                            selected.length ? selected.join(", ") : "Select Subjects";
+
+                        // Remove previous hidden inputs
+                        block.querySelectorAll(`input[name="subjects_${i}[]"]`).forEach(e => e.remove());
+                        // Add new hidden inputs
+                        selected.forEach(s => {
+                            const h = document.createElement("input");
+                            h.type = "hidden";
+                            h.name = `subjects_${i}[]`;
+                            h.value = s;
+                            block.appendChild(h);
+                        });
+
+                        updateTopics(i, selected, preset.subjectsObj, preset.topic);
                     });
-    
-                    updateTopics(i, selected, preset.subjectsObj, preset.topic);
                 });
-            });
-    
-            updateTopics(i, preset.subjects, preset.subjectsObj, preset.topic);
-        }
+
+                updateTopics(i, preset.subjects, preset.subjectsObj, preset.topic);
+            }
+
     
         function updateTopics(i, subjects, subjectsObj, selectedTopic = "") {
             const select = document.querySelector(`select[name="topic_${i}"]`);

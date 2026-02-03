@@ -33,6 +33,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project code
 COPY . .
 
+RUN mkdir -p /models/model1 /models/model2 && \
+    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model1.zip \
+        -O /models/model1.zip && \
+    unzip /models/model1.zip -d /models/model1 && \
+    rm /models/model1.zip && \
+    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model2.zip \
+        -O /models/model2.zip && \
+    unzip /models/model2.zip -d /models/model2 && \
+    rm /models/model2.zip
+
 # Entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
