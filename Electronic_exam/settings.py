@@ -81,15 +81,14 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 # }
 
 
-DB_HOST = os.environ.get("DB_HOST")  # full Cloud SQL instance name
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('DB_NAME', 'electronic_board'),
-        'USER': os.environ.get('DB_USER', 'postgres'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
-        'HOST': f"/cloudsql/{DB_HOST}",   # MUST be /cloudsql/<INSTANCE_CONNECTION_NAME>
-        'PORT': '',  # leave empty when using unix socket
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME", "exim_db"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", "/cloudsql/concrete-potion-477505-p2:asia-southeast1:exim-db"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
     }
 }
 
