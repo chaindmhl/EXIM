@@ -4,19 +4,20 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+SECRET_KEY = "django-insecure-t&ri-woq=wx@da@jwe%#soj(9ri9un%b@yzx3aq!m@g#q-*@n1"
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY environment variable is not set!")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "exim-142442460469.asia-southeast1.run.app,.run.app").split(",")
+
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 AUTH_USER_MODEL = 'board_exam.CustomUser'
 
 LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/login/'  # optional, where users go after login
+
 
 
 # --------------------------
@@ -80,23 +81,20 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 # }
 
 
-db_host = os.environ.get("DB_HOST")
-
-if db_host and not db_host.startswith("/cloudsql/"):
-    db_host = f"/cloudsql/{db_host}"
+DB_HOST = os.environ.get("DB_HOST")
+if not DB_HOST:
+    raise RuntimeError("DB_HOST environment variable is not set")
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('DB_NAME'),
-        'USER': os.environ.get('DB_USER'),
-        'PASSWORD': os.environ.get('DB_PASSWORD'),
-        'HOST': db_host,
-        'PORT': os.environ.get('DB_PORT', '5432'),
+        'NAME': os.environ.get('DB_NAME', 'electronic_board'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
+        'HOST': f"/cloudsql/{DB_HOST}",
+        'PORT': '5432',
     }
 }
-
-
 
 
 
