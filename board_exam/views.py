@@ -11,7 +11,7 @@ from scripts.check import detect_objects, sort_objects_by_distance, group_and_se
 from django.http import JsonResponse
 import numpy as np
 import cv2, time, os, json, base64, traceback
-from .forms import loginpForm, ChoiceFormSet, ImageFormSet
+from .forms import SignUpForm, ChoiceFormSet, ImageFormSet
 from django.contrib.auth import logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth import authenticate, login
