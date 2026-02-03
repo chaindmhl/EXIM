@@ -1,23 +1,24 @@
 #!/bin/sh
 set -e
 
-# === CONFIGURATION ===
+# =========================
+# CONFIGURATION
+# =========================
 MAX_ATTEMPTS=30
 SLEEP_TIME=3
 PORT="${PORT:-8080}"  # Cloud Run sets this automatically
 
-# Optional flags (DO NOT enable on Cloud Run service)
-# RUN_MIGRATIONS=true
-# CREATE_SUPERUSER=true
-# DJANGO_SUPERUSER_USERNAME
-# DJANGO_SUPERUSER_EMAIL
-# DJANGO_SUPERUSER_PASSWORD
+# Optional flags
+RUN_MIGRATIONS="${RUN_MIGRATIONS:-true}"
+CREATE_SUPERUSER="${CREATE_SUPERUSER:-false}"  # set true via env if needed
 
-# === WAIT FOR DATABASE ===
+# =========================
+# WAIT FOR DATABASE
+# =========================
 wait_for_db() {
   echo "Waiting for database..."
   attempts=0
-  until python - <<'END'
+  until python - <<END
 import sys
 from django.db import connections
 try:
@@ -38,48 +39,60 @@ END
   echo "Database is ready."
 }
 
-# === MAIN ===
 wait_for_db
 
-# === MIGRATIONS (EXPLICIT OPT-IN ONLY) ===
+# =========================
+# RUN MIGRATIONS
+# =========================
 if [ "$RUN_MIGRATIONS" = "true" ]; then
   echo "RUN_MIGRATIONS=true → running migrations"
   python manage.py migrate --noinput
 else
-  echo "RUN_MIGRATIONS not enabled → skipping migrations"
+  echo "Skipping migrations"
 fi
 
-# === COLLECT STATIC FILES ===
+# =========================
+# COLLECT STATIC FILES
+# =========================
 echo "Collecting static files..."
 python manage.py collectstatic --noinput || true
 
-# === SUPERUSER (EXPLICIT OPT-IN ONLY) ===
+# =========================
+# CREATE SUPERUSER
+# =========================
 if [ "$CREATE_SUPERUSER" = "true" ] && \
    [ -n "$DJANGO_SUPERUSER_USERNAME" ] && \
    [ -n "$DJANGO_SUPERUSER_EMAIL" ] && \
    [ -n "$DJANGO_SUPERUSER_PASSWORD" ]; then
 
   echo "Ensuring superuser exists..."
-  python manage.py shell <<'END'
+  python manage.py shell <<END
 from django.contrib.auth import get_user_model
+import os
 User = get_user_model()
-email = "$DJANGO_SUPERUSER_EMAIL"
+email = os.environ.get("DJANGO_SUPERUSER_EMAIL")
+username = os.environ.get("DJANGO_SUPERUSER_USERNAME")
+password = os.environ.get("DJANGO_SUPERUSER_PASSWORD")
 if not User.objects.filter(email=email).exists():
     User.objects.create_superuser(
+        username=username,
         email=email,
-        password="$DJANGO_SUPERUSER_PASSWORD"
+        password=password
     )
     print("Superuser created")
 else:
     print("Superuser already exists")
 END
+
 else
   echo "Superuser creation skipped"
 fi
 
-# === START SERVER ===
+# =========================
+# START GUNICORN
+# =========================
 echo "Starting Gunicorn..."
 exec gunicorn Electronic_exam.wsgi:application \
   --bind 0.0.0.0:$PORT \
   --workers 3 \
-  --timeout 120
+  --timeout 300
