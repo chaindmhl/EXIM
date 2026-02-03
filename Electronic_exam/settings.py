@@ -91,7 +91,7 @@ DATABASES = {
         'NAME': os.environ.get('DB_NAME', 'electronic_board'),
         'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
-        'HOST': f"/cloudsql/{DB_HOST}",
+        'DB_HOST' = os.environ.get('DB_HOST'),
         'PORT': '5432',
     }
 }
