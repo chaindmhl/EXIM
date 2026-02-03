@@ -11,7 +11,6 @@ from scripts.check import detect_objects, sort_objects_by_distance, group_and_se
 from django.http import JsonResponse
 import numpy as np
 import cv2, time, os, json, base64, traceback
-from .forms import SignUpForm, ChoiceFormSet, ImageFormSet
 from django.contrib.auth import logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth import authenticate, login
@@ -20,7 +19,7 @@ from django.contrib.auth.hashers import make_password
 from django.views.decorators.csrf import csrf_protect
 from django.db import IntegrityError
 from django.db.models import Q
-from .forms import AnswerSheetForm
+from .forms import AnswerSheetForm, SignUpForm, EmailAuthenticationForm
 from itertools import zip_longest
 from django.http import HttpResponseRedirect
 from django.urls import reverse
