@@ -81,20 +81,18 @@ WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 # }
 
 
-DB_HOST = os.environ.get("DB_HOST")
-if not DB_HOST:
-    raise RuntimeError("DB_HOST environment variable is not set")
-
+DB_HOST = os.environ.get("DB_HOST")  # full Cloud SQL instance name
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME', 'electronic_board'),
         'USER': os.environ.get('DB_USER', 'postgres'),
         'PASSWORD': os.environ.get('DB_PASSWORD', 'admin@03'),
-        'HOST' = os.environ.get('DB_HOST'),
-        'PORT': '5432',
+        'HOST': f"/cloudsql/{DB_HOST}",   # MUST be /cloudsql/<INSTANCE_CONNECTION_NAME>
+        'PORT': '',  # leave empty when using unix socket
     }
 }
+
 
 
 
