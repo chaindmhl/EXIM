@@ -9,63 +9,37 @@ class EmailAuthenticationForm(AuthenticationForm):
     username = forms.EmailField(label='Email', max_length=254)
 
 class SignUpForm(forms.ModelForm):
-    ROLE_CHOICES = (
-        ('teacher', 'Teacher'),
-        ('student', 'Student'),
-    )
-
-    role = forms.ChoiceField(choices=ROLE_CHOICES)
+    role = forms.ChoiceField(choices=(('teacher', 'Teacher'), ('student', 'Student')))
     student_id = forms.CharField(max_length=9, required=False)
-    course = forms.ChoiceField(
-        choices=(
-            ('Civil Engineering', 'Civil Engineering'),
-            ('Electrical Engineering', 'Electrical Engineering'),
-            ('Electronics Engineering', 'Electronics Engineering'),
-            ('Mechanical Engineering', 'Mechanical Engineering'),
-        ),
-        required=False
-    )
-
+    course = forms.ChoiceField(choices=(
+        ('Civil Engineering', 'Civil Engineering'),
+        ('Electrical Engineering', 'Electrical Engineering'),
+        ('Electronics Engineering', 'Electronics Engineering'),
+        ('Mechanical Engineering', 'Mechanical Engineering'),
+    ))
     last_name = forms.CharField(max_length=100)
     first_name = forms.CharField(max_length=100)
-    middle_name = forms.CharField(max_length=100, required=False)
-    birthdate = forms.DateField(required=False)
-
+    middle_name = forms.CharField(max_length=100)
+    birthdate = forms.DateField()
     email = forms.EmailField()
     password = forms.CharField(widget=forms.PasswordInput)
-    retype_password = forms.CharField(widget=forms.PasswordInput)
+    retype_password = forms.CharField(widget=forms.PasswordInput, label='Retype Password')
 
     class Meta:
         model = CustomUser
-        fields = [
-            'role', 'student_id', 'course',
-            'last_name', 'first_name', 'middle_name',
-            'birthdate', 'email', 'password', 'retype_password'
-        ]
+        fields = ['role', 'student_id', 'course', 'last_name', 'first_name', 'middle_name', 'birthdate', 'email', 'password', 'retype_password']
 
     def clean_email(self):
         email = self.cleaned_data.get('email')
         if CustomUser.objects.filter(email=email).exists():
-            raise forms.ValidationError("Email already exists.")
+            raise forms.ValidationError("This email address is already in use. Please use a different email.")
         return email
-
-    def clean(self):
-        cleaned = super().clean()
-        role = cleaned.get('role')
-
-        # password check
-        if cleaned.get('password') != cleaned.get('retype_password'):
-            self.add_error('retype_password', 'Passwords do not match.')
-
-        # student-specific checks
-        if role == 'student':
-            if not cleaned.get('student_id'):
-                self.add_error('student_id', 'Student ID is required.')
-            if not cleaned.get('course'):
-                self.add_error('course', 'Course is required.')
-
-        return cleaned
-
+    
+    def clean_student_id(self):
+        student_id = self.cleaned_data.get('student_id')
+        if self.cleaned_data.get('role') == 'student' and Student.objects.filter(student_id=student_id).exists():
+            raise forms.ValidationError("This student ID is already registered!")
+        return student_id
     
 
 class AnswerSheetForm(forms.Form):

@@ -50,19 +50,11 @@ COPY . .
 # -------------------------
 # Download models
 # -------------------------
-# RUN mkdir -p /models/model1 /models/model2 && \
-#     wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model1.zip -O /models/model1.zip && \
-#     unzip /models/model1.zip -d /models/model1 && rm /models/model1.zip && \
-#     wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model2.zip -O /models/model2.zip && \
-#     unzip /models/model2.zip -d /models/model2 && rm /models/model2.zip
-RUN mkdir -p /app/models && \
-    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model1.zip -O /tmp/model1.zip && \
-    unzip /tmp/model1.zip -d /app/models && \
-    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model2.zip -O /tmp/model2.zip && \
-    unzip /tmp/model2.zip -d /app/models && \
-    rm -rf /tmp/model1.zip /tmp/model2.zip
-
-
+RUN mkdir -p /models/model1 /models/model2 && \
+    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model1.zip -O /models/model1.zip && \
+    unzip /models/model1.zip -d /models/model1 && rm /models/model1.zip && \
+    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model2.zip -O /models/model2.zip && \
+    unzip /models/model2.zip -d /models/model2 && rm /models/model2.zip
 
 # -------------------------
 # Entrypoint

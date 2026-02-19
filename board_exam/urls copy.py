@@ -32,7 +32,7 @@ urlpatterns = [
     path('download_answer_key/', views.download_answer_key, name='download_answer_key'),
     path('download_exam_results/', views.download_exam_results, name='download_exam_results'),
     path('view-results/', views.view_results, name='view_results'),
-    
+
     # Exams / forms / results
     path('exam_form/<str:set_id>/', views.exam_form, name='exam_form'),
     path('result/<int:result_id>/', views.result_page, name='result_page'),

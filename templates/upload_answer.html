@@ -209,20 +209,24 @@
       event.preventDefault();
       let formData = new FormData(this);
 
-      fetch('', { method: 'POST', body: formData })
-        .then(response => response.json())
-        .then(data => {
-          if (data.warning) {
-            document.getElementById('feedback').innerText = data.warning;
-          } else {
-            document.getElementById('feedback').innerText = `Your Score: ${data.score}`;
-            document.getElementById('upload-form').style.display = 'none';
-          }
-        })
-        .catch(error => {
-          console.error('Error:', error);
-          document.getElementById('feedback').innerText = 'Error: Failed to submit answer. Please try again later.';
-        });
+      fetch('', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin'   // <--- add this
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.warning) {
+          document.getElementById('feedback').innerText = data.warning;
+        } else {
+          document.getElementById('feedback').innerText = `Your Score: ${data.score}`;
+          document.getElementById('upload-form').style.display = 'none';
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('feedback').innerText = 'Error: Failed to submit answer. Please try again later.';
+      });
     });
   </script>
 </body>

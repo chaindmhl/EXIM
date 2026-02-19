@@ -31,6 +31,10 @@ def calculate_distance(point1, point2):
 
 # Function to perform object detection
 def detect_objects(image, net, classes, confidence_threshold=0.5, iou_threshold=0.4):
+    
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
     height, width = image.shape[:2]  # Modified to handle grayscale images
 
     # Create a blob from the image
@@ -85,6 +89,7 @@ def detect_objects(image, net, classes, confidence_threshold=0.5, iou_threshold=
                     confidences.append(confidence)
                     class_ids.append(class_id)
 
+    del blob, outputs
     return boxes, confidences, class_ids
 
 # Function to sort detected objects based on their bounding box positions and distance from a specified point

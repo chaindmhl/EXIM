@@ -19,7 +19,7 @@ from django.contrib.auth.hashers import make_password
 from django.views.decorators.csrf import csrf_protect
 from django.db import IntegrityError
 from django.db.models import Q
-from .forms import AnswerSheetForm, SignUpForm, EmailAuthenticationForm 
+from .forms import AnswerSheetForm, SignUpForm, EmailAuthenticationForm
 from itertools import zip_longest
 from django.http import HttpResponseRedirect
 from django.urls import reverse
@@ -28,14 +28,14 @@ from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.conf import settings
 import PyPDF2
-import fitz, gc
+import fitz
 import pdfplumber, docx, string
 from docx import Document
 from PyPDF2 import PdfReader
 from django.core.files import File
 import pandas as pd
 from .config import BOARD_EXAM_TOPICS, LEVELS
-from django.db import models, transaction
+from django.db import models
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from django.db.models import Count, Q, Avg, F
@@ -44,8 +44,6 @@ from django.views.decorators.http import require_http_methods
 import datetime
 import openai
 from datetime import datetime
-# from scripts.model_loader import net_original, classes_original, net_cropped, classes_cropped
-from scripts.model_loader import get_original_model, get_cropped_model
 
 
 
@@ -65,60 +63,46 @@ from django.contrib.auth import login
 def signup(request):
     if request.method == 'POST':
         form = SignUpForm(request.POST)
+        if form.is_valid():
+            # Create and save the CustomUser instance
+            user = form.save(commit=False)
+            user.is_active = True
+            user.password = make_password(form.cleaned_data['password'])  # Hash the password
 
-        if not form.is_valid():
-            return render(request, 'signup.html', {'form': form})
+            # Determine role
+            role = form.cleaned_data.get('role')
+            if role == 'student':
+                user.is_student = True  # <-- Automatically mark student
+                user.save()
 
-        try:
-            with transaction.atomic():
-                user = form.save(commit=False)
-                user.set_password(form.cleaned_data['password'])
-                user.is_active = True
+                course = form.cleaned_data.get('course')
+                Student.objects.create(
+                    user=user,
+                    student_id=form.cleaned_data.get('student_id'),
+                    last_name=form.cleaned_data.get('last_name'),
+                    first_name=form.cleaned_data.get('first_name'),
+                    middle_name=form.cleaned_data.get('middle_name'),
+                    birthdate=form.cleaned_data.get('birthdate'),
+                    course=course,
+                )
+            elif role == 'teacher':
+                user.is_student = False  # <-- Teacher is not student
+                user.save()
 
-                role = form.cleaned_data['role']
+                Teacher.objects.create(
+                    user=user,
+                    last_name=form.cleaned_data.get('last_name'),
+                    first_name=form.cleaned_data.get('first_name'),
+                    middle_name=form.cleaned_data.get('middle_name'),
+                    birthdate=form.cleaned_data.get('birthdate'),
+                )
+            else:
+                raise ValidationError("Invalid role selected")
 
-                if role == 'student':
-                    user.is_student = True
-                    user.is_staff = False
-                    user.save()
-
-                    Student.objects.create(
-                        user=user,
-                        student_id=form.cleaned_data['student_id'],
-                        last_name=form.cleaned_data['last_name'],
-                        first_name=form.cleaned_data['first_name'],
-                        middle_name=form.cleaned_data.get('middle_name', ''),
-                        birthdate=form.cleaned_data.get('birthdate'),
-                        course=form.cleaned_data.get('course') or "",
-    )
-
-                elif role == 'teacher':
-                    user.is_student = False
-                    user.is_staff = True
-                    user.save()
-
-                    Teacher.objects.create(
-                        user=user,
-                        last_name=form.cleaned_data['last_name'],
-                        first_name=form.cleaned_data['first_name'],
-                        middle_name=form.cleaned_data.get('middle_name', ''),
-                        birthdate=form.cleaned_data.get('birthdate'),
-                    )
-
-                else:
-                    messages.error(request, "Invalid role.")
-                    return render(request, 'signup.html', {'form': form})
-
-        except Exception:
-            messages.error(request, "Something went wrong. Please try again.")
-            return render(request, 'signup.html', {'form': form})
-
-        messages.success(request, "Account created successfully!")
-        return redirect('login')
-
+            messages.success(request, "Account successfully signed up!")        
+            return redirect('login')
     else:
         form = SignUpForm()
-
     return render(request, 'signup.html', {'form': form})
 
 def login_view(request):
@@ -211,7 +195,7 @@ def student_dashboard(request):
 
 def logout_view(request):
     logout(request)
-    return redirect('login') 
+    return redirect('login')  
 
 ####################### FOR ADDING QUESTION TO QUESTION BANK ##############################
 
@@ -1413,189 +1397,167 @@ def image_to_mask(image):
     
     return mask
 
-# def upload_answer(request):
-#     if request.method == 'POST' and request.FILES.get('image'):
-#         uploaded_image = request.FILES['image']
-#         exam_id = request.POST.get('exam_id')
-
-#         # Retrieve answer key
-#         answer_key = get_object_or_404(AnswerKey, set_id=exam_id)
-#         subject = answer_key.subject
-
-#         # Convert uploaded image to OpenCV format
-#         nparr = np.frombuffer(uploaded_image.read(), np.uint8)
-#         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-#         # Convert to mask
-#         mask = image_to_mask(image)
-
-#         # Save mask to media folder
-#         unique_filename = f'mask_{int(time.time())}_{uuid.uuid4()}.jpg'
-#         mask_dir = os.path.join(settings.BASE_DIR, 'media', 'mask_images')
-#         os.makedirs(mask_dir, exist_ok=True)
-#         mask_path = os.path.join(mask_dir, unique_filename)
-#         cv2.imwrite(mask_path, mask)
-
-#         # Load mask for detection
-#         mask_image = cv2.imread(mask_path)
-
-#         # Reference point for distance calculations
-#         reference_point = (0, 0)
-
-#         # --- DETECTION PIPELINE ---
-
-#         # 1. Detect objects with original model
-#         boxes_original, _, class_ids_original = detect_objects(mask_image, net_original, classes_original)
-
-#         # 2. For each detected 'answer' object, crop and detect with second model
-#         for i, box in enumerate(boxes_original):
-#             class_name_original = classes_original[class_ids_original[i]]
-#             if class_name_original != 'answer':
-#                 continue  # skip non-answer boxes
-
-#             x, y, w, h = box
-#             cropped_object = mask_image[y:y+h, x:x+w]
-
-#             # Detect objects in cropped answer box
-#             boxes_cropped, _, class_ids_cropped = detect_objects(cropped_object, net_cropped, classes_cropped)
-
-#             # Sort by distance
-#             object_dict = sort_objects_by_distance(boxes_cropped, class_ids_cropped, classes_cropped, reference_point)
-
-#             # Group and assign sequence numbers
-#             grouped_boxes = group_and_sequence(object_dict.values(), object_dict.keys())
-
-#             # Map seq_num → class
-#             seq_num_class_dict = {}
-#             for seq_num, i in grouped_boxes.items():
-#                 class_name = classes_cropped[class_ids_cropped[i - 1]]
-#                 seq_num_class_dict[seq_num] = class_name
-
-#             # --- SCORE CALCULATION ---
-#             correct_answers = {str(k): v['letter'] for k, v in answer_key.answer_key.items()}
-#             score = sum(
-#                 1 for seq_num, submitted in seq_num_class_dict.items()
-#                 if correct_answers.get(str(seq_num)) == submitted
-#             )
-
-#             # --- SAVE TO DB ---
-#             student = get_object_or_404(Student, user_id=request.user)
-
-#             if Result.objects.filter(user=request.user, exam_id=exam_id).exists():
-#                 return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
-
-#             Result.objects.create(
-#                 user=request.user,
-#                 student_id=student.student_id,
-#                 course=student.course,
-#                 student_name=student,
-#                 subject=subject,
-#                 exam_id=exam_id,
-#                 answer=[seq_num_class_dict[k] for k in sorted(seq_num_class_dict.keys())],
-#                 correct_answer=list(correct_answers.values()),
-#                 score=score,
-#                 is_submitted=True
-#             )
-
-#             return JsonResponse({'score': score})
-
-#         return JsonResponse({'error': 'No answer class detected in image.'})
-
-#     return render(request, 'upload_answer.html')
 def upload_answer(request):
-    if request.method == 'POST' and request.FILES.get('image'):
+    if request.method == 'POST' and request.FILES['image']:
+        # Handle the uploaded image
         uploaded_image = request.FILES['image']
+        # Extract exam_id from the POST request
         exam_id = request.POST.get('exam_id')
-
+        # Retrieve the answer key from the database using exam_id
         answer_key = get_object_or_404(AnswerKey, set_id=exam_id)
         subject = answer_key.subject
-
-        # ---- Decode image (memory safe) ----
+        # Read the uploaded image using OpenCV
+        # nparr = np.fromstring(uploaded_image.read(), np.uint8)
         nparr = np.frombuffer(uploaded_image.read(), np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        # 🔴 IMPORTANT: resize EARLY
-        image = cv2.resize(image, (1024, 1024))
-
-        # ---- Convert to mask (in memory only) ----
-        mask_image = image_to_mask(image)
-
-        if len(mask_image.shape) == 2:
-            mask_image = cv2.cvtColor(mask_image, cv2.COLOR_GRAY2BGR)
         
-        reference_point = (0, 0)
+        # Convert image to mask using image_to_mask function
+        mask = image_to_mask(image)
 
-        # ---- Detection: original model ----
-        net_original, classes_original = get_original_model()
+        # Save the mask as an image
+        # cv2.imwrite('mask.jpg', mask)
+        
+        # Generate a unique filename for the mask image using timestamp and UUID
+        unique_filename = f'mask_{int(time.time())}_{uuid.uuid4()}.jpg'
 
-        boxes_original, _, class_ids_original = detect_objects(
-            mask_image, net_original, classes_original
-        )
+        # Create the directory if it doesn't exist
+        directory = os.path.join('media', 'mask_images')
 
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
-        for idx, box in enumerate(boxes_original):
-            class_name_original = classes_original[class_ids_original[idx]]
-            if class_name_original != 'answer':
-                continue
+        # Save the mask as an image with the unique filename
+        cv2.imwrite(os.path.join(directory, unique_filename), mask)
+        # Specify the path to YOLOv4 models and class names files
+        model1_weights_path = "model1/model1.weights"
+        model1_cfg_path = "model1/model1.cfg"
+        model1_names_path = "model1/model1.names"
 
+        model2_weights_path = "model2/model2.weights"
+        model2_cfg_path = "model2/model2.cfg"
+        model2_names_path = "model2/model2.names"
+
+        # Load YOLOv4 models and class names
+        net_original = cv2.dnn.readNet(model1_weights_path, model1_cfg_path)
+        classes_original = []
+        with open(model1_names_path, "r") as f:
+            classes_original = [line.strip() for line in f.readlines()]
+
+        net_cropped = cv2.dnn.readNet(model2_weights_path, model2_cfg_path)
+        classes_cropped = []
+        with open(model2_names_path, "r") as f:
+            classes_cropped = [line.strip() for line in f.readlines()]
+
+        # Specify the reference point from which to measure the distance
+        reference_point = (0, 0)  # Example point, you should specify your desired point here
+
+        # mask_image = cv2.imread('mask.jpg')
+        mask_image = cv2.imread(os.path.join('media', 'mask_images', unique_filename))
+
+        # Perform object detection with the first model
+        boxes_original, _, class_ids_original = detect_objects(mask_image, net_original, classes_original)
+
+        # Crop detected objects and perform detection with the second model
+        for i, box in enumerate(boxes_original):
             x, y, w, h = box
             cropped_object = mask_image[y:y+h, x:x+w]
 
-            # ---- Detection: cropped model ----
-            net_cropped, classes_cropped = get_cropped_model()
+            # Get the class name corresponding to the detected object
+            class_name_original = classes_original[class_ids_original[i]]
 
-            boxes_cropped, _, class_ids_cropped = detect_objects(
-                cropped_object, net_cropped, classes_cropped
-            )
+            # Check if class name is 'answer'
+            if class_name_original == 'answer':
+                # Perform object detection with the second model
+                boxes_cropped, _, class_ids_cropped = detect_objects(cropped_object, net_cropped, classes_cropped)
 
+                # Sort detected objects by distance from the reference point
+                object_dict = sort_objects_by_distance(boxes_cropped, class_ids_cropped, classes_cropped, reference_point)
 
-            object_dict = sort_objects_by_distance(
-                boxes_cropped, class_ids_cropped, classes_cropped, reference_point
-            )
+                # Group and assign sequence numbers to the detected objects
+                grouped_boxes = group_and_sequence(object_dict.values(), object_dict.keys())
 
-            grouped_boxes = group_and_sequence(
-                object_dict.values(), object_dict.keys()
-            )
+                # Create a dictionary to store seq_num:class pairs
+                seq_num_class_dict = {}
 
-            seq_num_class_dict = {}
-            for seq_num, i in grouped_boxes.items():
-                seq_num_class_dict[seq_num] = classes_cropped[class_ids_cropped[i - 1]]
+                # Display the cropped object with bounding boxes, class labels, and reference point
+                for seq_num, i in grouped_boxes.items():
+                    # Find the corresponding box coordinates for the class
+                    box = boxes_cropped[i - 1]  # Subtract 1 since sequence numbers start from 1
+                    x, y, w, h = box
 
-            correct_answers = {str(k): v['letter'] for k, v in answer_key.answer_key.items()}
+                    # Draw bounding box
+                    cv2.rectangle(cropped_object, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
-            score = sum(
-                1 for seq, submitted in seq_num_class_dict.items()
-                if correct_answers.get(str(seq)) == submitted
-            )
+                    # Put class label above the bounding box
+                    cv2.putText(cropped_object, f"{seq_num}:{classes_cropped[class_ids_cropped[i - 1]]}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-            student = get_object_or_404(Student, user_id=request.user)
+                    # Find the corresponding class name using the class ID
+                    class_name = classes_cropped[class_ids_cropped[i - 1]]  # Subtract 1 since sequence numbers start from 1
+                    seq_num_class_dict[seq_num] = class_name
 
-            if Result.objects.filter(user=request.user, exam_id=exam_id).exists():
-                return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
+                    # Draw reference point
+                    cv2.circle(cropped_object, reference_point, 5, (255, 0, 0), -1)
 
-            Result.objects.create(
-                user=request.user,
-                student_id=student.student_id,
-                course=student.course,
-                student_name=student,
-                subject=subject,
-                exam_id=exam_id,
-                answer=[seq_num_class_dict[k] for k in sorted(seq_num_class_dict)],
-                correct_answer=list(correct_answers.values()),
-                score=score,
-                is_submitted=True
-            )
+                correct_answers = {str(k): v['letter'] for k, v in answer_key.answer_key.items()}
+                submitted_answers = seq_num_class_dict.values()
 
-            # ---- FORCE MEMORY RELEASE ----
-            del image, mask_image, cropped_object
-            gc.collect()
+                # # Calculate the score based on similarities between correct and submitted answers
+                # score = sum(correct_answer == submitted_answer for correct_answer, submitted_answer in zip(correct_answers.values(), submitted_answers))
 
-            return JsonResponse({'score': score})
+                # Calculate score
+                score = 0
+                comparison_results = {}
+                for seq_num, submitted_answer in seq_num_class_dict.items():
+                    correct_answer = correct_answers.get(str(seq_num))
+                   
+                    if correct_answer is not None:
+                        is_correct = submitted_answer == correct_answer
+                        comparison_results[seq_num] = {'submitted_answer': submitted_answer, 'correct_answer': correct_answer, 'is_correct': is_correct}
+                        if is_correct:
+                            score += 1
 
-        return JsonResponse({'error': 'No answer class detected in image.'})
+                # Get the user_id from the request
+                user_id = request.user
+                print("User ID:", user_id)
 
-    return render(request, 'upload_answer.html')
+                # Get the student corresponding to the user_id
+                student = get_object_or_404(Student, user_id=user_id)
+                print("Student:", student)
+                print("Subject:", subject)
+                existing_results = Result.objects.filter(user=user_id)
+                print("Existing Results for User:", existing_results)
+                if Result.objects.filter(user=user_id, exam_id=exam_id).exists():
+                    # If a Result entry already exists for the user and exam_id, return a warning message
+                    return JsonResponse({'warning': 'An answer is already uploaded for this user and exam ID'})
+                else: 
+                    try:
+                        # Create a Result object and save it
+                        result = Result.objects.create(
+                            user = user_id,
+                            student_id=student.student_id,
+                            course=student.course,
+                            student_name = student,
+                            subject= subject,  # Replace "Your subject" with the subject name
+                            exam_id=exam_id,
+                            # answer=list(submitted_answers),
+                            answer = [seq_num_class_dict[k] for k in sorted(seq_num_class_dict.keys())],
+                            correct_answer=list(correct_answers.values()),
+                            score=score,
+                            is_submitted=True
+                        )
+                        print("Result:", result)  # Debug statement
 
+                    except IntegrityError:
+                        # If IntegrityError occurs (duplicate key), return a warning message
+                        return JsonResponse({'warning': 'An answer is already uploaded for this user and exam ID'})
+
+                    return JsonResponse({'score': score})  # Return an HttpResponse with the score
+
+        # If no 'answer' class is detected
+        return JsonResponse({'error': 'No answer class detected in the image'})
+
+    else:
+        return render(request, 'upload_answer.html')
 
 def answer_sheet_view(request):
     if request.method == 'POST':
