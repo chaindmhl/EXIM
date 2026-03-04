@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from google.oauth2 import service_account
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -43,7 +44,31 @@ INSTALLED_APPS = [
     'rest_framework',
     'board_exam',
     "whitenoise.runserver_nostatic",
+    "storages"
 ]
+from google.cloud import storage
+
+# This will use:
+# - Service account credentials in Cloud Run
+# - GOOGLE_APPLICATION_CREDENTIALS locally (optional)
+try:
+    # For Cloud Run or environment with default credentials
+    client = storage.Client()
+except Exception:
+    # Optional: fallback for local development if you want to use JSON file
+    import os
+    from google.oauth2 import service_account
+    GS_CREDENTIALS = service_account.Credentials.from_service_account_file(
+        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    )
+    client = storage.Client(credentials=GS_CREDENTIALS)
+
+DEFAULT_FILE_STORAGE = "storages.backends.gcloud.GoogleCloudStorage"
+GS_BUCKET_NAME = "exim-media-concrete-potion-477505-p2"
+GS_DEFAULT_ACL = None   # Required if using Uniform Bucket Level Access
+GS_FILE_OVERWRITE = False
+
+MEDIA_URL = f"https://storage.googleapis.com/{GS_BUCKET_NAME}/"
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

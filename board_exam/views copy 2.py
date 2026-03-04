@@ -215,61 +215,48 @@ def logout_view(request):
 
 ####################### FOR ADDING QUESTION TO QUESTION BANK ##############################
 
-from django.http import FileResponse, Http404
-from google.cloud import storage
-from .models import Question
-
-# Initialize GCS client using default credentials
-storage_client = storage.Client()
-BUCKET_NAME = "exim-media-concrete-potion-477505-p2"
-bucket = storage_client.bucket(BUCKET_NAME)
-
-
-def serve_image(request, image_name):
-    blob = bucket.blob(image_name)
-
-    if not blob.exists():
-        raise Http404("Image not found")
-
-    image_bytes = blob.download_as_bytes()
-
-    # Get the correct content type from GCS metadata
-    content_type = blob.content_type or "application/octet-stream"
-
-    return HttpResponse(image_bytes, content_type=content_type)
-
-
 def question_bank(request):
+    # Prefetch all related objects for efficiency
     questions = Question.objects.all().prefetch_related(
-        'choices', 'images', 'board_exams', 'subjects', 'topic'
+        'choices',       # Choices
+        'images',        # Question images
+        'board_exams',   # Board exams
+        'subjects',      # Subjects
+        'topic'          # Topic (assuming ForeignKey)
     )
 
     letters = ["A", "B", "C", "D", "E"]
 
     for q in questions:
-        # Choices A-E
+        # Map choices to letters A-E
         q.lettered_choices = []
         for i, choice in enumerate(q.choices.all()):
             if i < 5:
                 q.lettered_choices.append((letters[i], choice))
+        # Pad with None if fewer than 5 choices
         while len(q.lettered_choices) < 5:
             q.lettered_choices.append((None, None))
 
-        # Correct answer
+        # Correct answer text
         correct_choice = next((choice for choice in q.choices.all() if choice.is_correct), None)
         q.correct_answer_text = correct_choice.text if correct_choice else "-"
 
-        # Board exams, subjects, topic
+        # Board exams names
         q.board_exam_names = ", ".join([be.name for be in q.board_exams.all()])
+
+        # Subjects names
         q.subject_names = ", ".join([sub.name for sub in q.subjects.all()])
+
+        # Topic name
         q.topic_name = q.topic.name if q.topic else "-"
+
+        # Difficulty name
         q.level_name = q.difficulty.level if q.difficulty else "-"
 
-        # Just pass GCS image names (not URLs)
-        q.image_names = [img.image.name for img in q.images.all()]
+        # Image urls (list)
+        q.image_urls = [img.image.url for img in q.images.all()] if q.images.exists() else []
 
     return render(request, 'question_bank.html', {'questions': questions})
-
 class Add_Question(View):
     def get(self, request):
         context = {
@@ -559,9 +546,9 @@ def download_test_pdf(request):
         set_a_question_ids = request.POST.getlist('set_a_question_ids[]')
         set_b_question_ids = request.POST.getlist('set_b_question_ids[]')
 
-        exam_date_str = timezone.now().strftime("%b%Y")
-        set_a_id = f"{board_exam_name}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
-        set_b_id = f"{board_exam_name}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
+        # Generate unique IDs in format: BOARD_EXAM_UUID
+        set_a_id = f"{board_exam_name}_{uuid.uuid4().hex[:8]}"
+        set_b_id = f"{board_exam_name}_{uuid.uuid4().hex[:8]}"
 
         # Build questions and answer keys
         questions_set_a = get_questions_with_choices(set_a_question_ids)
@@ -1520,19 +1507,14 @@ def upload_answer(request):
         uploaded_image = request.FILES['image']
         exam_id = request.POST.get('exam_id')
 
-        # --- LOAD MODELS (FROM model_loader.py) ---
-        net_original, classes_original = get_original_model()
-        net_cropped, classes_cropped = get_cropped_model()
-
-        # --- GET ANSWER KEY ---
         answer_key = get_object_or_404(AnswerKey, set_id=exam_id)
         subject = answer_key.subject
 
-        # --- DECODE IMAGE ---
+        # --- Decode image ---
         nparr = np.frombuffer(uploaded_image.read(), np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # --- MASK (OLD BEHAVIOR, NO RESIZE) ---
+        # ❗ DO NOT resize (keep old behavior)
         mask_image = image_to_mask(image)
 
         if mask_image.ndim == 2:
@@ -1540,9 +1522,7 @@ def upload_answer(request):
 
         reference_point = (0, 0)
 
-        # ===============================
-        # DETECT ANSWER BOXES (ORIGINAL)
-        # ===============================
+        # --- DETECTION (OLD LOGIC) ---
         boxes_original, _, class_ids_original = detect_objects(
             mask_image, net_original, classes_original
         )
@@ -1556,9 +1536,6 @@ def upload_answer(request):
             x, y, w, h = box
             cropped_object = mask_image[y:y+h, x:x+w]
 
-            # ===========================
-            # DETECT BUBBLES (CROPPED)
-            # ===========================
             boxes_cropped, _, class_ids_cropped = detect_objects(
                 cropped_object, net_cropped, classes_cropped
             )
@@ -1581,13 +1558,18 @@ def upload_answer(request):
                     class_ids_cropped[idx - 1]
                 ]
 
-            # --- PRESERVE OLD ORDER ---
+            # preserve original append behavior
             for k in sorted(seq_num_class_dict):
                 all_answers.append(seq_num_class_dict[k])
 
-        # ===============================
-        # SCORE COMPUTATION (FLEXIBLE)
-        # ===============================
+        # --- HARD VALIDATION ---
+        if len(all_answers) != 100:
+            return JsonResponse({
+                'error': 'Incomplete detection',
+                'detected': len(all_answers),
+                'answers': all_answers
+            })
+
         correct_answers = {
             str(k): v['letter']
             for k, v in answer_key.answer_key.items()
@@ -1598,16 +1580,15 @@ def upload_answer(request):
             if correct_answers.get(str(i)) == a
         )
 
-        total_items = len(correct_answers)
-
         student = get_object_or_404(Student, user_id=request.user)
 
         if Result.objects.filter(user=request.user, exam_id=exam_id).exists():
             return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
+        
+        print("Detected answers:", len(all_answers))
+        print(all_answers)
 
-        # ===============================
-        # SAVE RESULT ONLY (NO IMAGES)
-        # ===============================
+
         Result.objects.create(
             user=request.user,
             student_id=student.student_id,
@@ -1618,19 +1599,14 @@ def upload_answer(request):
             answer=all_answers,
             correct_answer=list(correct_answers.values()),
             score=score,
-            total_items=total_items,
             is_submitted=True
         )
 
-        # --- CLEANUP ---
+        # --- FORCE MEMORY RELEASE ---
         del image, mask_image, cropped_object
         gc.collect()
 
-        return JsonResponse({
-            'score': score,
-            'detected': len(all_answers),
-            'total_items': total_items
-        })
+        return JsonResponse({'score': score})
 
     return render(request, 'upload_answer.html')
 
@@ -1653,12 +1629,9 @@ def online_answer_test(request):
 
     subject = request.POST.get('subject')
     board_exam = request.POST.get('board_exam')
-    exam_date_str = timezone.now().strftime("%b%Y")
 
-
-    set_a_id = f"{board_exam}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
-    set_b_id = f"{board_exam}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
-
+    set_a_id = f"{board_exam}_{uuid.uuid4().hex[:8]}"
+    set_b_id = f"{board_exam}_{uuid.uuid4().hex[:8]}"
 
     set_a_question_ids = request.POST.getlist('set_a_question_ids[]')
     set_b_question_ids = request.POST.getlist('set_b_question_ids[]')
@@ -2140,7 +2113,7 @@ def practice_start(request):
             payload.append({
                 'id': q.id,
                 'text': q.question_text,
-                'image_name': q.images.first().image.name if q.images.exists() else None,
+                'image_url': q.images.first().image.url if q.images.exists() else None,
                 'choices': [
                     {"key": c.id, "text": c.text, "is_correct": c.is_correct} for c in q.choices.all()
                 ],
@@ -2187,7 +2160,7 @@ def practice_take(request, session_id):
             'instance_id': qi,
             'q_id': q['id'],
             'text': q['text'],
-            'image_name': q['image_name'],
+            'image_url': q['image_url'],
             'choices': choices
         })
 

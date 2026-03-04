@@ -170,9 +170,10 @@
       
           {# Images #}
           <td>
-              {% if question.images.all %}
-                  {% for img in question.images.all %}
-                      <img src="{{ img.image.url }}" alt="Figure" style="max-width:80px; max-height:80px;" />
+              {% if question.image_names %}
+                  {{ img_name }}
+                  {% for img_name in question.image_names %}
+                      <img src="{% url 'serve_image' img_name %}" alt="Figure" style="max-width:80px; max-height:80px;" />
                   {% endfor %}
               {% else %}
                   -

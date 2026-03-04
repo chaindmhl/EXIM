@@ -87,9 +87,7 @@
                 <thead>
                     <tr>
                         <th>Date Taken</th>
-                        <th>Course</th>
                         <th>Subject</th>
-                        <th>Exam ID</th>
                         <th>Score</th>
                         <th>Elapsed Time</th>
                         <th>Status</th>
@@ -99,9 +97,7 @@
                     {% for result in results %}
                     <tr>
                         <td>{{ result.timestamp|date:"M d, Y - h:i A" }}</td>
-                        <td>{{ result.course }}</td>
                         <td>{{ result.subject }}</td>
-                        <td>{{ result.exam_id }}</td>
                         <td>{{ result.score }}/{{result.total_items}}</td>
                         <td>{{ result.elapsed_time }}</td>
                         <td>

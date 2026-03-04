@@ -100,7 +100,7 @@ class AnswerKey(models.Model):
     board_exam = models.CharField(max_length=100) 
     subject = models.CharField(max_length=100)
     # topic = models.CharField(max_length=100, default="Misc")      
-    set_id = models.CharField(max_length=32, unique=True)
+    set_id = models.CharField(max_length=100, unique=True)
     answer_key = models.JSONField()
 
     def __str__(self):
@@ -108,7 +108,7 @@ class AnswerKey(models.Model):
     
 
 class TestKey(models.Model):
-    set_id = models.CharField(max_length=32, unique=True)
+    set_id = models.CharField(max_length=100, unique=True)
     board_exam = models.CharField(max_length=50)
     subject = models.CharField(max_length=100)
     exam_date = models.DateField(default=timezone.now)

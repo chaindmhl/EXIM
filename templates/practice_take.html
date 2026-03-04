@@ -37,8 +37,11 @@
         <div class="question-block" data-index="{{ forloop.counter0 }}" data-instance="{{ q.instance_id }}">
           <div class="mb-3">
             <h5>{{ forloop.counter }}. {{ q.text }}</h5>
-            {% if q.image_url %}
-              <img src="{{ q.image_url }}" alt="figure" style="max-width:280px" class="mb-2"/>
+            {% if q.image_name %}
+              <img src="{% url 'serve_image' q.image_name %}" 
+                  alt="figure" 
+                  style="max-width:280px" 
+                  class="mb-2"/>
             {% endif %}
           </div>
 

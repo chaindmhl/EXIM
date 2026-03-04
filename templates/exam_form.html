@@ -1,194 +1,347 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Exam Form</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #d8d6d6;
-            margin: 0;
-            padding: 0;
-            color: #333;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exam Form</title>
 
-        h2 {
-            color: #f05a1e;
-            text-align: center;
-            margin-top: 30px;
-            font-size: 2rem;
-        }
+<style>
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #d8d6d6;
+        margin: 0;
+        padding: 0;
+        color: #333;
+    }
 
-        h3 {
-            color: #495057;
-            text-align: left;
-            font-size: 1rem;
-            margin-top: 0;
-            margin-left: 0;
-            margin-bottom: 20px;
-        }
+    h2 {
+        color: #f05a1e;
+        text-align: center;
+        margin-top: 30px;
+        font-size: 2rem;
+    }
 
-        form {
-            max-width: 700px;
-            margin: 30px auto;
-            padding: 30px;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            text-align: left;
-        }
+    form {
+        max-width: 700px;
+        margin: 30px auto;
+        padding: 30px;
+        background-color: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        position: relative;
+    }
 
-        .question {
-            margin-bottom: 30px;
-        }
+    .question-page {
+        display: none;
+    }
 
-        .question p {
-            font-weight: bold;
-            font-size: 1.1rem;
-            margin-bottom: 10px;
-            color: #000000;
-        }
+    .question p, .question h5 {
+        font-weight: bold;
+    }
 
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-size: 1rem;
-        }
+    label {
+        display: block;
+        margin-bottom: 8px;
+    }
 
-        input[type="radio"] {
-            margin-right: 10px;
-            margin-top: 5px;
-        }
+    .navigation {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 20px;
+    }
 
-        button {
-            display: block;
-            width: 100%;
-            padding: 12px;
-            background-color: #28a745;
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1.2rem;
-            margin-top: 20px;
-            transition: background-color 0.3s, transform 0.2s;
-        }
+    .nav-btn {
+        width: 48%;
+        padding: 10px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+    }
 
-        button:hover {
-            background-color: #218838;
-            transform: scale(1.05);
-        }
+    .nav-btn:hover {
+        background-color: #0056b3;
+    }
 
-        button:focus {
-            outline: none;
-        }
+    .submit-btn {
+        width: 100%;
+        padding: 12px;
+        background-color: #28a745;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        margin-top: 20px;
+        font-size: 1.1rem;
+    }
 
-        .question img {
-            max-width: 100%;
-            height: 150px;
-            margin-top: 15px;
-            border-radius: 5px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Responsive styling */
-        @media (max-width: 768px) {
-            h2 {
-                font-size: 1.8rem;
-            }
-
-            .question p {
-                font-size: 1rem;
-            }
-
-            button {
-                font-size: 1rem;
-                padding: 15px;
-            }
-        }
-
-    </style>
+    #questionIndicator {
+        text-align: center;
+        margin-top: 10px;
+        font-weight: bold;
+        color: #555;
+    }
+</style>
 </head>
+
 <body>
 
-    <h2>{{ test_key.subject }}</h2>
-    <form id="examForm" method="post">
-        {% csrf_token %}
-        <input type="hidden" id="start_time" name="start_time" value="{{ start_time }}">
-        
-        <!-- Timer in top-right corner -->
-        <div id="timer" style="
-            position: absolute;
-            top: 15px;
-            right: 20px;
-            background-color: #f05a1e;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 5px;
-            font-weight: bold;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            z-index: 1000;
-        ">
-            Time Remaining: <span id="total-timer"></span>
-        </div>
-        
-        <h3>QUESTIONS</h3>
-        
-        {% for q_text, choices, image_url in question_choices %}
-            <div class="question">
-                <h5>{{ forloop.counter }}. {{ q_text }}</h5>
-                {% if image_url %}
-                <img src="{{ image_url }}" alt="figure" style="max-width:280px"/>
-                {% endif %}
-                <div class="choices">
-                    {% for c in choices %}
-                    <label>
-                      <input type="radio" name="question_{{ forloop.parentloop.counter }}" value="{{ c.1 }}">
-                      {{ c.0 }}. {{ c.1 }}
-                    </label>
-                  {% endfor %}                  
-                </div>
-            </div>
+<h2>{{ test_key.subject }}</h2>
+
+<form id="examForm" method="post">
+{% csrf_token %}
+<input type="hidden" name="start_time" value="{{ start_time }}">
+
+<div id="timer" style="
+position:absolute;
+top:15px;
+right:20px;
+background:#f05a1e;
+color:white;
+padding:8px 12px;
+border-radius:5px;
+font-weight:bold;">
+Time Remaining: <span id="total-timer"></span>
+</div>
+
+<div id="expiredMessage" style="
+display:none;
+margin-top:50px;
+padding:15px;
+background:#dc3545;
+color:white;
+font-weight:bold;
+text-align:center;
+border-radius:6px;">
+EXAM TIME EXPIRED. Your answers are being submitted automatically.
+</div>
+
+<h3>QUESTIONS</h3>
+
+{% for q_text, choices, image_url in question_choices %}
+<div class="question-page">
+    <div class="question">
+        <h5>{{ forloop.counter }}. {{ q_text }}</h5>
+
+        {% if image_url %}
+        <img src="{{ image_url }}" style="max-width:280px">
+        {% endif %}
+
+        {% for c in choices %}
+        <label>
+            <input type="radio"
+                   name="question_{{ forloop.parentloop.counter }}"
+                   value="{{ c.1 }}">
+            {{ c.0 }}. {{ c.1 }}
+        </label>
         {% endfor %}
-            
-        <button type="submit">Submit Answers</button>
-    </form>
-    
-    <!-- <p>Total Time Remaining: <span id="total-timer"></span></p> -->
-    
-    <script>
-        document.getElementById('examForm').onsubmit = function(e) {
-            const questions = document.querySelectorAll('.question');
-            for (let i = 0; i < questions.length; i++) {
-                const radios = questions[i].querySelectorAll('input[type="radio"]');
-                if (![...radios].some(r => r.checked)) {
-                    alert("Please select an answer for question " + (i + 1));
-                    e.preventDefault();
-                    return false;
-                }
+    </div>
+</div>
+{% endfor %}
+
+<div id="questionIndicator"></div>
+
+<div class="navigation">
+    <button type="button" id="prevBtn" class="nav-btn">Previous</button>
+    <button type="button" id="nextBtn" class="nav-btn">Next</button>
+</div>
+
+<button type="submit" class="submit-btn">Submit Answers</button>
+
+</form>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+const form = document.getElementById("examForm");
+const examKey = "exam_{{ test_key.set_id }}";
+
+/* ===============================
+   PAGINATION
+=============================== */
+
+const pages = document.querySelectorAll(".question-page");
+let currentPage = 0;
+
+function showPage(index) {
+    pages.forEach((page, i) => {
+        page.style.display = (i === index) ? "block" : "none";
+    });
+
+    document.getElementById("prevBtn").style.display =
+        (index === 0) ? "none" : "inline-block";
+
+    document.getElementById("nextBtn").style.display =
+        (index === pages.length - 1) ? "none" : "inline-block";
+
+    document.getElementById("questionIndicator").innerText =
+        "Question " + (index + 1) + " of " + pages.length;
+
+    localStorage.setItem(examKey + "_currentPage", index);
+}
+
+const savedPage = localStorage.getItem(examKey + "_currentPage");
+if (savedPage) currentPage = parseInt(savedPage);
+
+showPage(currentPage);
+
+document.getElementById("nextBtn").onclick = function () {
+    if (currentPage < pages.length - 1) {
+        currentPage++;
+        showPage(currentPage);
+    }
+};
+
+document.getElementById("prevBtn").onclick = function () {
+    if (currentPage > 0) {
+        currentPage--;
+        showPage(currentPage);
+    }
+};
+
+/* ===============================
+   AUTO SAVE ANSWERS
+=============================== */
+
+form.addEventListener("change", function () {
+    let answers = {};
+    document.querySelectorAll("input[type=radio]:checked")
+        .forEach(input => answers[input.name] = input.value);
+
+    localStorage.setItem(examKey + "_answers", JSON.stringify(answers));
+});
+
+const savedAnswers = localStorage.getItem(examKey + "_answers");
+if (savedAnswers) {
+    const parsed = JSON.parse(savedAnswers);
+    Object.keys(parsed).forEach(name => {
+        const radio = document.querySelector(
+            `input[name="${name}"][value="${parsed[name]}"]`);
+        if (radio) radio.checked = true;
+    });
+}
+
+function lockExamUI() {
+
+    // Disable all radio buttons
+    document.querySelectorAll("input[type=radio]")
+        .forEach(r => r.disabled = true);
+
+    // Disable navigation buttons
+    document.getElementById("prevBtn").disabled = true;
+    document.getElementById("nextBtn").disabled = true;
+
+    // Disable submit button
+    document.querySelector(".submit-btn").disabled = true;
+
+    // Show expired message
+    document.getElementById("expiredMessage").style.display = "block";
+}
+
+/* ===============================
+   TIMER
+=============================== */
+
+let storedTime = localStorage.getItem(examKey + "_remainingTime");
+let totalTime = storedTime
+    ? parseInt(storedTime)
+    : parseInt("{{ total_time_limit|default:14400 }}");
+
+if (totalTime < 0) totalTime = 0;
+
+let timerExpired = false;
+
+function formatTime(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+
+    return `${h.toString().padStart(2,'0')}:` +
+           `${m.toString().padStart(2,'0')}:` +
+           `${s.toString().padStart(2,'0')}`;
+}
+
+function updateDisplay() {
+    document.getElementById("total-timer").innerText =
+        formatTime(totalTime);
+}
+
+updateDisplay();
+if (totalTime === 0) {
+    lockExamUI();
+} 
+
+// If expired and pending submit, try submitting immediately
+if (totalTime === 0 &&
+    localStorage.getItem(examKey + "_pendingSubmit") === "true" &&
+    navigator.onLine) {
+
+    localStorage.removeItem(examKey + "_pendingSubmit");
+    form.submit();
+}
+
+let interval = setInterval(() => {
+
+    if (timerExpired) return;
+
+    if (totalTime <= 0) {
+
+        totalTime = 0;
+        timerExpired = true;
+
+        localStorage.setItem(examKey + "_remainingTime", 0);
+        updateDisplay();
+        clearInterval(interval);
+
+        lockExamUI(); 
+
+        // Prevent multiple submits
+        if (!localStorage.getItem(examKey + "_submitted")) {
+
+            localStorage.setItem(examKey + "_submitted", "true");
+
+            if (!navigator.onLine) {
+                localStorage.setItem(examKey + "_pendingSubmit", "true");
+                alert("Time is up! Will auto-submit when internet reconnects.");
+            } else {
+                form.submit();
             }
-            if (!confirm("Are you sure you want to submit the answers?")) {
-                e.preventDefault();
-                return false;
-            }
-            return true;
         }
 
-    
-        let totalTime = parseInt("{{ total_time_limit|default:14400 }}");
-        let interval = setInterval(() => {
-            if (totalTime <= 0) {
-                clearInterval(interval);
-                alert("Time is up! The exam will be submitted automatically.");
-                document.getElementById("examForm").submit();
-            }
-            const h = Math.floor(totalTime / 3600);
-            const m = Math.floor((totalTime % 3600) / 60);
-            const s = totalTime % 60;
-            document.getElementById("total-timer").innerText = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-            totalTime--;
-        }, 1000);
-    </script>
+        return;
+    }
+
+    totalTime--;
+    localStorage.setItem(examKey + "_remainingTime", totalTime);
+    updateDisplay();
+
+}, 1000);
+
+/* ===============================
+   AUTO SUBMIT ON RECONNECT
+=============================== */
+
+window.addEventListener("online", function () {
+    if (localStorage.getItem(examKey + "_pendingSubmit") === "true") {
+        localStorage.removeItem(examKey + "_pendingSubmit");
+        form.submit();
+    }
+});
+
+/* ===============================
+   CLEAN STORAGE AFTER SUBMIT
+=============================== */
+
+form.onsubmit = function () {
+    localStorage.removeItem(examKey + "_answers");
+    localStorage.removeItem(examKey + "_remainingTime");
+    localStorage.removeItem(examKey + "_pendingSubmit");
+    localStorage.removeItem(examKey + "_currentPage");
+    localStorage.removeItem(examKey + "_submitted");
+};
+
+});
+</script>
+
 </body>
 </html>

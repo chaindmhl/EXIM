@@ -72,6 +72,8 @@ urlpatterns = [
     path('download_test_interface/', views.download_test_interface, name='download_test_interface'),
     path('download_existing_test_pdf/', views.download_existing_test_pdf, name='download_existing_test_pdf'),
 
+    path('gcs-image/<path:image_name>/', views.serve_image, name='serve_image'),
+    
     # DRF API root moved to /api/
     path('api/', include(router.urls)),
 ]
