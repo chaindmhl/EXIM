@@ -5,6 +5,7 @@ from .views import Add_Question, signup
 from . import views
 from rest_framework.routers import DefaultRouter
 
+
 router = DefaultRouter()
 # Register any viewsets with router here if needed
 # Example: router.register(r'questions', QuestionViewSet)
@@ -76,6 +77,8 @@ urlpatterns = [
     
     # DRF API root moved to /api/
     path('api/', include(router.urls)),
+    
+
 ]
 
 # Serve static files

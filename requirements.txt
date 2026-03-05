@@ -16,3 +16,4 @@ whitenoise
 python-dotenv==1.0.0
 django-storages==1.14.3 
 google-cloud-storage
+djangorestframework-simplejwt

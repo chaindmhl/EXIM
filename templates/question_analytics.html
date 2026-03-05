@@ -104,7 +104,7 @@
           <td class="py-2 px-4 border text-center">{{ stat.total }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="4" class="text-center py-2">No data available</td></tr>
+        <tr><td colspan="2" class="text-center py-2">No data available</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -114,12 +114,12 @@
   <div class="grid md:grid-cols-2 gap-8 mb-8">
     <div class="bg-white shadow rounded-lg p-6">
       <h2 class="text-xl font-semibold mb-2">Questions per Course</h2>
-      <canvas id="courseChart"></canvas>
+      <canvas id="courseChart" height="120"></canvas>
     </div>
 
     <div class="bg-white shadow rounded-lg p-6">
       <h2 class="text-xl font-semibold mb-2">Difficulty Distribution</h2>
-      <canvas id="difficultyChart"></canvas>
+      <canvas id="difficultyChart" height="120"></canvas>
     </div>
   </div>
 
@@ -152,11 +152,11 @@
 
 <!-- Chart.js Script -->
 <script>
-const courseLabels = JSON.parse('{{ course_labels|safe }}');
-const courseTotals = JSON.parse('{{ total_questions|safe }}');
+const courseLabels = JSON.parse('{{ course_labels|escapejs }}');
+const courseTotals = JSON.parse('{{ total_questions|escapejs }}');
 
-const difficultyLabels = JSON.parse('{{ difficulty_labels|safe }}');
-const difficultyCounts = JSON.parse('{{ difficulty_counts|safe }}');
+const difficultyLabels = JSON.parse('{{ difficulty_labels|escapejs }}');
+const difficultyCounts = JSON.parse('{{ difficulty_counts|escapejs }}');
 
 // Course Chart
 const courseColors = [

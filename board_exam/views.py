@@ -1982,7 +1982,12 @@ def view_results(request):
 
 def question_analytics(request):
     # Fetch all questions with related data
-    questions = Question.objects.prefetch_related('board_exams').select_related('subject', 'difficulty')
+    questions = Question.objects.prefetch_related(
+        'board_exams',
+        'subjects'
+    ).select_related(
+        'difficulty'
+    )
 
     board_exam_counts = {}
     subject_counts = {}
@@ -1990,22 +1995,31 @@ def question_analytics(request):
 
     for q in questions:
         board_exams = list(q.board_exams.all())
-        if not board_exams:
-            board_exams = [None]  # handle questions with no board exam
+        subjects = list(q.subjects.all())
 
+        if not board_exams:
+            board_exams = [None]
+
+        if not subjects:
+            subjects = [None]
+
+        # Count per board exam
         for be in board_exams:
             be_name = be.name if be else "No Board Exam"
             board_exam_counts[be_name] = board_exam_counts.get(be_name, 0) + 1
 
-            subject_name = q.subject.name if q.subject else "Unknown Subject"
-            key = (be_name, subject_name)
-            subject_counts[key] = subject_counts.get(key, 0) + 1
+            for subj in subjects:
+                subject_name = subj.name if subj else "Unknown Subject"
+                key = (be_name, subject_name)
+                subject_counts[key] = subject_counts.get(key, 0) + 1
 
+        # Difficulty count
         difficulty_name = q.difficulty.level if q.difficulty else "Unknown Difficulty"
         difficulty_counts[difficulty_name] = difficulty_counts.get(difficulty_name, 0) + 1
 
     # Convert dicts into list of dicts for template
     course_stats = [{"board_exam": k, "total": v} for k, v in board_exam_counts.items()]
+
     subject_distribution = [
         {"board_exam": be, "subject": subj, "total_questions": count}
         for (be, subj), count in subject_counts.items()

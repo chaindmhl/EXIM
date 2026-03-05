@@ -20,6 +20,7 @@ class Question(models.Model):
     topic = models.ForeignKey("Topic", on_delete=models.SET_NULL, null=True, blank=True)
     difficulty = models.ForeignKey("DifficultyLevel", on_delete=models.SET_NULL, null=True)
     source = models.CharField(max_length=255, default="google.com", null=False)
+    usage_count = models.IntegerField(default=0)
     question_text = models.TextField()
 
     def __str__(self):

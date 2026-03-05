@@ -46,6 +46,16 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "storages"
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+}
+
 from google.cloud import storage
 
 # This will use:
