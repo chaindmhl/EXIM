@@ -57,6 +57,23 @@ logo_path = os.path.join(settings.BASE_DIR, 'static', 'EXIM2.png')  # full path
 #     "Electrical Engineering": "EE",
 # }
 
+#test
+from firebase_admin import firestore
+
+db = firestore.client()
+
+def test_firestore(request):
+    # write test data
+    doc_ref = db.collection("test").add({
+        "message": "Cloud Run can access Firestore",
+        "status": "success"
+    })
+
+    return JsonResponse({
+        "ok": True,
+        "doc_id": doc_ref[1].id
+    })
+
 ####################### FOR SIGNING UP ##############################
 
 from django.contrib.auth import login
