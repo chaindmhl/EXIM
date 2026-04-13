@@ -1,7 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
-from .models import QuestionForm, Question, BoardExam, Subject, Topic, DifficultyLevel, Question, QuestionImage, Choice, AnswerKey, TestKey, Teacher, Student, Result, PracticeResult, SubjectAnalytics, TopicAnalytics, DifficultyAnalytics
 from django.views import View
 from django.template.loader import render_to_string
 from weasyprint import HTML
@@ -44,10 +43,15 @@ from django.views.decorators.http import require_http_methods
 import datetime
 import openai
 from datetime import datetime
-# from scripts.model_loader import net_original, classes_original, net_cropped, classes_cropped
+from services.question_service import get_questions
 from scripts.model_loader import get_original_model, get_cropped_model
 
-
+def firebase_login_required(view_func):
+    def wrapper(request, *args, **kwargs):
+        if not request.session.get("uid"):
+            return redirect("login")
+        return view_func(request, *args, **kwargs)
+    return wrapper
 
 logo_path = os.path.join(settings.BASE_DIR, 'static', 'EXIM2.png')  # full path
 # SET_ID_PREFIX = {
@@ -191,7 +195,7 @@ def get_user_role(request):
 # =========================
 # DASHBOARD ROUTING
 # =========================
-@login_required
+@firebase_login_required
 def main_dashboard(request):
     role = request.session.get("role")
 
@@ -206,7 +210,7 @@ def main_dashboard(request):
 # =========================
 # TEACHER DASHBOARD
 # =========================
-@login_required
+@firebase_login_required
 def home(request):
     role = request.session.get("role")
 
@@ -219,7 +223,7 @@ def home(request):
 # =========================
 # STUDENT DASHBOARD
 # =========================
-@login_required
+@firebase_login_required
 def home_student(request):
     role = request.session.get("role")
 
@@ -2459,7 +2463,7 @@ def practice_result_page(request, session_id):
 
 from django.core.serializers.json import DjangoJSONEncoder
 
-@login_required
+@firebase_login_required
 def analytics_dashboard(request):
 
     user_id = request.user.id
