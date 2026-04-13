@@ -57,16 +57,24 @@ logo_path = os.path.join(settings.BASE_DIR, 'static', 'EXIM2.png')  # full path
 #     "Electrical Engineering": "EE",
 # }
 
-#test
-from firebase_admin import firestore
+from django.shortcuts import render, redirect
+from django.http import JsonResponse, HttpResponseForbidden
+from django.contrib import messages
+from django.views.decorators.csrf import csrf_protect
+from django.contrib.auth.decorators import login_required
+
+from firebase_admin import firestore, auth
 
 db = firestore.client()
 
+# =========================
+# FIRESTORE TEST
+# =========================
 def test_firestore(request):
-    # write test data
     doc_ref = db.collection("test").add({
         "message": "Cloud Run can access Firestore",
-        "status": "success"
+        "status": "success",
+        "timestamp": firestore.SERVER_TIMESTAMP
     })
 
     return JsonResponse({
@@ -74,10 +82,10 @@ def test_firestore(request):
         "doc_id": doc_ref[1].id
     })
 
-####################### FOR SIGNING UP ##############################
 
-from django.contrib.auth import login
-
+# =========================
+# SIGNUP (FIREBASE AUTH)
+# =========================
 @csrf_protect
 def signup(request):
     if request.method == 'POST':
@@ -87,478 +95,417 @@ def signup(request):
             return render(request, 'signup.html', {'form': form})
 
         try:
-            with transaction.atomic():
-                user = form.save(commit=False)
-                user.set_password(form.cleaned_data['password'])
-                user.is_active = True
+            role = form.cleaned_data['role']
+            email = form.cleaned_data['email']
+            password = form.cleaned_data['password']
 
-                role = form.cleaned_data['role']
+            # 1. Create Firebase Auth user
+            user_record = auth.create_user(
+                email=email,
+                password=password
+            )
 
-                if role == 'student':
-                    user.is_student = True
-                    user.is_staff = False
-                    user.save()
+            uid = user_record.uid
 
-                    Student.objects.create(
-                        user=user,
-                        student_id=form.cleaned_data['student_id'],
-                        last_name=form.cleaned_data['last_name'],
-                        first_name=form.cleaned_data['first_name'],
-                        middle_name=form.cleaned_data.get('middle_name', ''),
-                        birthdate=form.cleaned_data.get('birthdate'),
-                        course=form.cleaned_data.get('course') or "",
-    )
+            # 2. Create Firestore user profile
+            db.collection("users").document(uid).set({
+                "email": email,
+                "role": role,
+                "first_name": form.cleaned_data.get('first_name', ''),
+                "last_name": form.cleaned_data.get('last_name', ''),
+                "middle_name": form.cleaned_data.get('middle_name', ''),
+                "student_id": form.cleaned_data.get('student_id', ''),
+                "course": form.cleaned_data.get('course', ''),
+                "birthdate": str(form.cleaned_data.get('birthdate', '')),
+                "created_at": firestore.SERVER_TIMESTAMP
+            })
 
-                elif role == 'teacher':
-                    user.is_student = False
-                    user.is_staff = True
-                    user.save()
+            messages.success(request, "Account created successfully!")
+            return redirect('login')
 
-                    Teacher.objects.create(
-                        user=user,
-                        last_name=form.cleaned_data['last_name'],
-                        first_name=form.cleaned_data['first_name'],
-                        middle_name=form.cleaned_data.get('middle_name', ''),
-                        birthdate=form.cleaned_data.get('birthdate'),
-                    )
-
-                else:
-                    messages.error(request, "Invalid role.")
-                    return render(request, 'signup.html', {'form': form})
-
-        except Exception:
-            messages.error(request, "Something went wrong. Please try again.")
+        except Exception as e:
+            messages.error(request, f"Error: {str(e)}")
             return render(request, 'signup.html', {'form': form})
 
-        messages.success(request, "Account created successfully!")
-        return redirect('login')
+    return render(request, 'signup.html', {'form': SignUpForm()})
 
-    else:
-        form = SignUpForm()
 
-    return render(request, 'signup.html', {'form': form})
-
+# =========================
+# LOGIN (FIREBASE TOKEN)
+# =========================
 def login_view(request):
     if request.method == 'POST':
-        form = EmailAuthenticationForm(request, data=request.POST)
-        if form.is_valid():
-            user = authenticate(
-                request,
-                username=form.cleaned_data.get('username'),
-                password=form.cleaned_data.get('password')
-            )
-            if user:
-                login(request, user)
-                if is_teacher(user):
-                    return redirect('home')
-                elif is_student(user):
-                    return redirect('home_student')
-                else:
-                    logout(request)
-                    messages.error(request, "No role assigned.")
-                    return redirect('login')
-            messages.error(request, "Invalid email or password.")
-        else:
-            messages.error(request, "Please correct the errors below.")
-    else:
-        form = EmailAuthenticationForm()
-    return render(request, 'login.html', {'form': form})
+        id_token = request.POST.get('id_token')
+
+        try:
+            decoded = auth.verify_id_token(id_token)
+            uid = decoded['uid']
+
+            user_doc = db.collection("users").document(uid).get()
+
+            if not user_doc.exists:
+                return JsonResponse({"error": "User not found"}, status=404)
+
+            user_data = user_doc.to_dict()
+            role = user_data.get("role")
+
+            # store session
+            request.session["uid"] = uid
+            request.session["role"] = role
+
+            if role == "teacher":
+                return redirect("home")
+            else:
+                return redirect("home_student")
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
+
+    return render(request, 'login.html')
 
 
+# =========================
+# LOGOUT
+# =========================
 def logout_view(request):
-    logout(request)
+    request.session.flush()
     return redirect('login')
-####################### FOR DASHBOARD ##############################
-
-def is_teacher(user):
-    return hasattr(user, 'teacher') and user.is_staff
-
-def is_student(user):
-    return hasattr(user, 'student') and user.is_student
 
 
+# =========================
+# ROLE HELPERS
+# =========================
+def get_user_role(request):
+    uid = request.session.get("uid")
+    if not uid:
+        return None
+
+    user_doc = db.collection("users").document(uid).get()
+
+    if user_doc.exists:
+        return user_doc.to_dict().get("role")
+
+    return None
+
+
+# =========================
+# DASHBOARD ROUTING
+# =========================
 @login_required
 def main_dashboard(request):
-    if request.user.is_authenticated:
-        if is_teacher(request.user):
-            return redirect('home')  # Redirect to teacher dashboard
-        else:
-            return redirect('student_dashboard')  # Redirect to student dashboard
+    role = request.session.get("role")
+
+    if role == "teacher":
+        return redirect("home")
+    elif role == "student":
+        return redirect("home_student")
     else:
-        return redirect('login')  # Redirect to login page if user is not authenticated
+        return redirect("login")
 
-from django.http import HttpResponseForbidden
 
-from django.http import HttpResponseForbidden
-
+# =========================
+# TEACHER DASHBOARD
+# =========================
 @login_required
 def home(request):
-    # Only allow teachers/staff
-    if not request.user.is_staff and not hasattr(request.user, 'teacher'):
+    role = request.session.get("role")
+
+    if role != "teacher":
         return HttpResponseForbidden("You cannot access this page")
+
     return render(request, 'home.html')
 
+
+# =========================
+# STUDENT DASHBOARD
+# =========================
 @login_required
 def home_student(request):
-    # Only allow students
-    if not hasattr(request.user, 'student'):
+    role = request.session.get("role")
+
+    if role != "student":
         return HttpResponseForbidden("You cannot access this page")
+
     return render(request, 'home_student.html')
 
 
+# =========================
+# ROOT REDIRECT
+# =========================
 def root_redirect(request):
-    """Redirect users to the correct dashboard based on role"""
-    if not request.user.is_authenticated:
-        return redirect('login')  # Not logged in → login page
+    if not request.session.get("uid"):
+        return redirect("login")
 
-    # Check user role
-    if request.user.is_staff and hasattr(request.user, 'teacher'):
-        return redirect('home')  # Teacher/admin
-    elif hasattr(request.user, 'student'):
-        return redirect('home_student')  # Student
+    role = request.session.get("role")
+
+    if role == "teacher":
+        return redirect("home")
+    elif role == "student":
+        return redirect("home_student")
     else:
-        # Optional: fallback for logged-in users with no role
-        return redirect('login')
+        return redirect("login")
 
-
-@login_required
-def student_dashboard(request):
-    # Logic for student's dashboard
-    return render(request, 'student_dashboard.html')
-
-def logout_view(request):
-    logout(request)
-    return redirect('login') 
-
-####################### FOR ADDING QUESTION TO QUESTION BANK ##############################
-
-from django.http import FileResponse, Http404
+from firebase_admin import firestore
 from google.cloud import storage
-from .models import Question
+import random, uuid
 
-# Initialize GCS client using default credentials
+db = firestore.client()
+
 storage_client = storage.Client()
 BUCKET_NAME = "exim-media-concrete-potion-477505-p2"
 bucket = storage_client.bucket(BUCKET_NAME)
-
 
 def serve_image(request, image_name):
     blob = bucket.blob(image_name)
 
     if not blob.exists():
-        raise Http404("Image not found")
+        return HttpResponse("Image not found", status=404)
 
     image_bytes = blob.download_as_bytes()
-
-    # Get the correct content type from GCS metadata
     content_type = blob.content_type or "application/octet-stream"
 
     return HttpResponse(image_bytes, content_type=content_type)
 
-
 def question_bank(request):
-    questions = Question.objects.all().prefetch_related(
-        'choices', 'images', 'board_exams', 'subjects', 'topic'
-    )
+    questions_ref = db.collection("questions").stream()
 
-    letters = ["A", "B", "C", "D", "E"]
+    questions = []
 
-    for q in questions:
-        # Choices A-E
-        q.lettered_choices = []
-        for i, choice in enumerate(q.choices.all()):
-            if i < 5:
-                q.lettered_choices.append((letters[i], choice))
-        while len(q.lettered_choices) < 5:
-            q.lettered_choices.append((None, None))
+    for doc in questions_ref:
+        q = doc.to_dict()
+        q["id"] = doc.id
 
-        # Correct answer
-        correct_choice = next((choice for choice in q.choices.all() if choice.is_correct), None)
-        q.correct_answer_text = correct_choice.text if correct_choice else "-"
+        # format choices
+        letters = ["A", "B", "C", "D", "E"]
+        choices = q.get("choices", [])
 
-        # Board exams, subjects, topic
-        q.board_exam_names = ", ".join([be.name for be in q.board_exams.all()])
-        q.subject_names = ", ".join([sub.name for sub in q.subjects.all()])
-        q.topic_name = q.topic.name if q.topic else "-"
-        q.level_name = q.difficulty.level if q.difficulty else "-"
+        q["lettered_choices"] = [
+            {"letter": letters[i], "text": c.get("text")}
+            for i, c in enumerate(choices[:5])
+        ]
 
-        # Just pass GCS image names (not URLs)
-        q.image_names = [img.image.name for img in q.images.all()]
+        q["correct_answer_text"] = next(
+            (c["text"] for c in choices if c.get("is_correct")),
+            "-"
+        )
 
-    return render(request, 'question_bank.html', {'questions': questions})
+        q["image_names"] = q.get("images", [])
+
+        questions.append(q)
+
+    return render(request, "question_bank.html", {"questions": questions})
+
+from django.views import View
+from django.shortcuts import redirect
 
 class Add_Question(View):
     def get(self, request):
         context = {
             'BOARD_EXAMS': list(BOARD_EXAM_TOPICS.keys()),
-            'BOARD_EXAM_TOPICS_JSON': json.dumps(BOARD_EXAM_TOPICS),
             'LEVELS_JSON': json.dumps(LEVELS),
         }
         return render(request, "add_question.html", context)
 
     def post(self, request):
-        # Count dynamically generated questions
-        num_questions = sum(1 for key in request.POST.keys() if key.startswith("question_text_"))
+
+        num_questions = sum(
+            1 for key in request.POST.keys()
+            if key.startswith("question_text_")
+        )
 
         if num_questions == 0:
             messages.error(request, "No questions to save!")
             return redirect("add_question")
 
         for i in range(1, num_questions + 1):
-            board_exam_names = request.POST.getlist(f"board_exam_{i}")  # multiple exams
-            subject_names = request.POST.getlist(f"subjects_{i}[]")      # <-- fixed here
+
+            board_exam_names = request.POST.getlist(f"board_exam_{i}")
+            subject_names = request.POST.getlist(f"subjects_{i}[]")
             topic_name = request.POST.get(f"topic_{i}")
             level_name = request.POST.get(f"level_{i}")
             question_text = request.POST.get(f"question_text_{i}")
             source = request.POST.get(f"source_{i}", "google.com")
 
-            # Create or get Subject objects
-            subjects = []
-            for name in subject_names:
-                sub_obj, _ = Subject.objects.get_or_create(name=name)
-                subjects.append(sub_obj)
-
-            # Create or get Topic and Difficulty
-            topic = Topic.objects.get_or_create(name=topic_name, subject=subjects[0])[0]
-            level = DifficultyLevel.objects.get_or_create(level=level_name)[0]
-
-            # Create Question
-            q = Question.objects.create(
-                topic=topic,
-                difficulty=level,
-                question_text=question_text,
-                source=source
-            )
-
-            # Add all selected subjects
-            q.subjects.set(subjects)
-
-            # Add board exams
-            for name in board_exam_names:
-                exam = BoardExam.objects.get_or_create(name=name)[0]
-                q.board_exams.add(exam)
-
-            # Save uploaded image if any
+            # upload image
             image_file = request.FILES.get(f"image_{i}")
-            if image_file:
-                QuestionImage.objects.create(question=q, image=image_file)
+            image_url = None
 
-            # Save choices
-            for choice_letter in ["A", "B", "C", "D", "E"]:
-                choice_text = request.POST.get(f"choice{choice_letter}_{i}")
-                if choice_text:
-                    is_correct = request.POST.get(f"correct_answer_{i}") == choice_letter
-                    Choice.objects.create(
-                        question=q,
-                        text=choice_text,
-                        is_correct=is_correct
-                    )
+            if image_file:
+                blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
+                blob.upload_from_file(image_file)
+                blob.make_public()
+                image_url = blob.public_url
+
+            # build choices
+            choices = []
+            correct_letter = request.POST.get(f"correct_answer_{i}")
+
+            for letter in ["A", "B", "C", "D", "E"]:
+                text = request.POST.get(f"choice{letter}_{i}")
+                if text:
+                    choices.append({
+                        "text": text,
+                        "is_correct": letter == correct_letter
+                    })
+
+            # FIRESTORE QUESTION
+            db.collection("questions").add({
+                "board_exams": board_exam_names,
+                "subjects": subject_names,
+                "topic": topic_name,
+                "difficulty": level_name,
+                "question_text": question_text,
+                "source": source,
+                "images": [image_url] if image_url else [],
+                "choices": choices,
+                "usage_count": 0,
+                "created_at": firestore.SERVER_TIMESTAMP
+            })
 
         messages.success(request, f"{num_questions} questions added successfully!")
         return redirect("question_bank")
 
-
-####################### FOR CREATING EXAMINATION ##############################   
-
 def get_random_questions(num_questions, subject):
-    # Retrieve questions from the database filtered by subject
-    all_questions = list(Question.objects.filter(subject=subject))
 
-    # Check if the number of requested questions is greater than the available questions
-    if num_questions > len(all_questions):
-        raise ValueError("Number of requested questions exceeds the available questions for the subject.")
+    all_q = db.collection("questions").where(
+        "subjects", "array_contains", subject
+    ).stream()
 
-    # Randomly select the specified number of questions
-    selected_questions = random.sample(all_questions, num_questions)
+    questions = [q.to_dict() | {"id": q.id} for q in all_q]
 
-    return selected_questions
+    if num_questions > len(questions):
+        raise ValueError("Not enough questions")
 
-
-
-# reuse your existing config context
-context = {
-    'BOARD_EXAMS': list(BOARD_EXAM_TOPICS.keys()),
-    'BOARD_EXAM_TOPICS_JSON': json.dumps(BOARD_EXAM_TOPICS),
-    'LEVELS_JSON': json.dumps(LEVELS),
-}
+    return random.sample(questions, num_questions)
 
 def generate_set_id(board_exam):
-    board_exam = board_exam.lower()
-
-    if "civil" in board_exam:
-        prefix = "CE"
-    elif "mechanical" in board_exam:
-        prefix = "ME"
-    elif "electronics" in board_exam or "ece" in board_exam:
-        prefix = "ECE"
-    elif "electrical" in board_exam or "ee" in board_exam:
-        prefix = "EE"
-    else:
-        prefix = "GEN"
-
-    # UUID shortened to 8 characters only
-    return f"{prefix}_{uuid.uuid4().hex[:8]}"
-
-def get_shuffled_choices(question):
-    choices = list(question.choices.all())
-    random.shuffle(choices)
-    # Assign letters A, B, C, ... dynamically
-    letters = ['A', 'B', 'C', 'D', 'E']
-    return [{'letter': letters[i], 'text': choice.text} for i, choice in enumerate(choices)]
-    
-def shuffle_question_choices(question):
-    import random
-    choices = list(question.choices.all())
-    random.shuffle(choices)
-    letters = ['A', 'B', 'C', 'D', 'E']
-    return [{'letter': letters[i], 'text': c.text, 'is_correct': c.is_correct} for i, c in enumerate(choices)]
-
-
-def build_question_data(questions):
-    data = []
-    for q in questions:
-        image_obj = q.images.first()
-        data.append({
-            'id': q.id,
-            'question_text': q.question_text,
-            'image': image_obj.image.url if image_obj else None,
-            'choices': get_shuffled_choices(q)
-        })
-    return data
-
-
-def generate_test(request):
-    context = {
-        'BOARD_EXAMS': list(BOARD_EXAM_TOPICS.keys()),
-        'SUBJECTS_JSON': json.dumps(BOARD_EXAM_TOPICS),
-        'LEVELS': LEVELS,
+    prefix_map = {
+        "civil": "CE",
+        "mechanical": "ME",
+        "electronics": "ECE",
+        "electrical": "EE"
     }
 
-    if request.method == 'POST':
-        board_exam = request.POST.get('board_exam')
-        subject = request.POST.get('subject', '').strip()
-        topic = request.POST.get('topic', '').strip()
-        num_questions = int(request.POST.get('num_questions', 0))
+    board_exam_lower = board_exam.lower()
 
-        qs = Question.objects.all()
+    prefix = "GEN"
+    for k, v in prefix_map.items():
+        if k in board_exam_lower:
+            prefix = v
+
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+    
+def generate_test(request):
+
+    if request.method == "POST":
+
+        board_exam = request.POST.get("board_exam")
+        subject = request.POST.get("subject", "")
+        num_questions = int(request.POST.get("num_questions", 0))
+
+        qs = db.collection("questions")
+
         if board_exam:
-            qs = qs.filter(board_exams__name__iexact=board_exam)
+            qs = qs.where("board_exams", "array_contains", board_exam)
+
         if subject:
-            qs = qs.filter(subjects__name__icontains=subject)
-        if topic:
-            qs = qs.filter(topic__name__icontains=topic)
-        if qs.count() < num_questions:
-            context['error_message'] = "Not enough questions available."
-            return render(request, 'generate_test.html', context)
+            qs = qs.where("subjects", "array_contains", subject)
 
-        # Select random questions
-        selected_questions = random.sample(list(qs), num_questions)
+        docs = list(qs.stream())
 
-        # Shuffle questions for each set independently
-        set_a_questions = build_question_data(selected_questions.copy())
-        random.shuffle(selected_questions)  # shuffle the original list for Set B
-        set_b_questions = build_question_data(selected_questions)
+        questions = [d.to_dict() | {"id": d.id} for d in docs]
 
-        return render(request, 'generated_test.html', {
-            'set_a_questions': set_a_questions,
-            'set_b_questions': set_b_questions,
-            'board_exam': board_exam,
-            'subject': subject,
-            'set_a_id': uuid.uuid4().hex,
-            'set_b_id': uuid.uuid4().hex,
+        if len(questions) < num_questions:
+            return render(request, "generate_test.html", {
+                "error_message": "Not enough questions"
+            })
+
+        selected = random.sample(questions, num_questions)
+
+        return render(request, "generated_test.html", {
+            "set_a_questions": selected,
+            "set_b_questions": random.sample(selected, len(selected)),
+            "board_exam": board_exam,
+            "subject": subject,
+            "set_a_id": uuid.uuid4().hex,
+            "set_b_id": uuid.uuid4().hex,
         })
 
-    return render(request, 'generate_test.html', context)
-
-
-####################### FOR DOWNLOADING EXAMINATION SHEET ##############################
-def map_letter_text(choices_lists, correct_text_dict):
-    """
-    choices_lists: list of lists, e.g. [choicesA, choicesB, choicesC, ...]
-    correct_text_dict: {1: "4", 2: "Blue", ...}
+    return render(request, "generate_test.html")
     
-    Returns: { "1": {"letter": "A", "text": "4"}, ... }
-    """
+import string
+import random
+import uuid
+from firebase_admin import firestore
+
+db = firestore.client()
+
+def map_letter_text(choices_lists, correct_text_dict):
+
     answer_key = {}
     num_choices = len(choices_lists)
-    letters = list(string.ascii_uppercase[:num_choices])  # ['A','B','C',...]
-    
+    letters = list(string.ascii_uppercase[:num_choices])
+
     for i, correct_text in correct_text_dict.items():
-        # Map letters to the corresponding choice text
-        choice_map = {letters[idx]: choices_lists[idx][i-1] for idx in range(num_choices)}
-        correct_letter = next((l for l, t in choice_map.items() if t == correct_text), None)
-        answer_key[str(i)] = {"letter": correct_letter, "text": correct_text}
-    
+
+        choice_map = {
+            letters[idx]: choices_lists[idx][i-1]
+            for idx in range(num_choices)
+        }
+
+        correct_letter = next(
+            (l for l, t in choice_map.items() if t == correct_text),
+            None
+        )
+
+        answer_key[str(i)] = {
+            "letter": correct_letter,
+            "text": correct_text
+        }
+
     return answer_key
 
-# Helper: extract choice lists from questions
-def extract_choices_by_letter(questions):
-    letters = ['A', 'B', 'C', 'D', 'E']
-    choice_map = {letter: [] for letter in letters}
-    for q in questions:
-        q_choices = q.get('choices', [])
-        for i, letter in enumerate(letters):
-            if i < len(q_choices):
-                choice_map[letter].append(q_choices[i]['text'])
-            else:
-                choice_map[letter].append(None)  # pad empty choices
-    return choice_map
+def get_questions_with_choices(question_docs):
 
-
-def build_testkey_choices(question_ids):
-    letters = ['A','B','C','D','E']
-    result = {l: [] for l in letters}
-
-    for qid in question_ids:
-        q = Question.objects.get(id=qid)
-        choices = list(q.choices.all().order_by('id'))
-
-        for i, letter in enumerate(letters):
-            if i < len(choices):
-                result[letter].append(choices[i].text)
-            else:
-                result[letter].append(None)
-
-    return result
-
-# Helper to build question data including choices
-def get_questions_with_choices(question_ids):
     questions = []
     letters = ['A', 'B', 'C', 'D', 'E']
-    for qid in question_ids:
-        q = Question.objects.get(id=qid)
-        image_obj = q.images.first()
-        image_url = image_obj.image.url if image_obj else None
 
-        choice_objs = list(q.choices.all().order_by('id'))
-        choices = []
-        for letter, choice in zip(letters, choice_objs):
-            choices.append({
-                "letter": letter,
-                "text": str(choice.text)
+    for doc in question_docs:
+        q = doc.to_dict()
+
+        choices = q.get("choices", [])
+
+        formatted_choices = []
+        for i, c in enumerate(choices[:5]):
+            formatted_choices.append({
+                "letter": letters[i],
+                "text": c.get("text")
             })
 
         questions.append({
-            "question": str(q.question_text),
-            "choices": choices,
-            "image_url": str(image_url) if image_url else None
+            "id": doc.id,
+            "question": q.get("question_text"),
+            "choices": formatted_choices,
+            "image_url": q.get("images", [None])[0]
         })
+
     return questions
 
-# Helper to build answer key (letter-text)
-def build_answer_key(question_ids):
-    letters = ['A','B','C','D','E']
+def build_answer_key(question_docs):
+
+    letters = ['A', 'B', 'C', 'D', 'E']
     answer_key = {}
 
-    for i, qid in enumerate(question_ids, start=1):
-        q = Question.objects.get(id=qid)
-        choices = list(q.choices.all().order_by('id'))
+    for i, doc in enumerate(question_docs, start=1):
+
+        q = doc.to_dict()
+        choices = q.get("choices", [])
 
         for idx, c in enumerate(choices):
-            if c.is_correct:
+            if c.get("is_correct"):
                 answer_key[str(i)] = {
                     "letter": letters[idx],
-                    "text": str(c.text)
+                    "text": c.get("text")
                 }
                 break
 
@@ -566,490 +513,388 @@ def build_answer_key(question_ids):
 
 
 def download_test_pdf(request):
-    if request.method != 'POST':
+
+    if request.method != "POST":
         return HttpResponse("Invalid request method", status=405)
 
     try:
-        subject_name = request.POST.get('subject')
-        board_exam_name = request.POST.get('board_exam')
+        subject_name = request.POST.get("subject")
+        board_exam_name = request.POST.get("board_exam")
 
-        set_a_question_ids = request.POST.getlist('set_a_question_ids[]')
-        set_b_question_ids = request.POST.getlist('set_b_question_ids[]')
+        set_a_ids = request.POST.getlist("set_a_question_ids[]")
+        set_b_ids = request.POST.getlist("set_b_question_ids[]")
 
-        exam_date_str = timezone.now().strftime("%b%Y")
-        set_a_id = f"{board_exam_name}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
-        set_b_id = f"{board_exam_name}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
+        # 🔥 FETCH FROM FIRESTORE
+        set_a_docs = [
+            db.collection("questions").document(qid).get()
+            for qid in set_a_ids
+        ]
 
-        # Build questions and answer keys
-        questions_set_a = get_questions_with_choices(set_a_question_ids)
-        questions_set_b = get_questions_with_choices(set_b_question_ids)
+        set_b_docs = [
+            db.collection("questions").document(qid).get()
+            for qid in set_b_ids
+        ]
 
-        set_a_answer_key = build_answer_key(set_a_question_ids)
-        set_b_answer_key = build_answer_key(set_b_question_ids)
+        questions_set_a = get_questions_with_choices(set_a_docs)
+        questions_set_b = get_questions_with_choices(set_b_docs)
 
-        set_a_choice_map = extract_choices_by_letter(questions_set_a)
-        set_b_choice_map = extract_choices_by_letter(questions_set_b)
+        set_a_answer_key = build_answer_key(set_a_docs)
+        set_b_answer_key = build_answer_key(set_b_docs)
 
-        # Save TestKey objects
-        TestKey.objects.create(
-            set_id=set_a_id,
-            board_exam=board_exam_name,
-            subject=subject_name,
-            questions=questions_set_a,
-            choiceA=set_a_choice_map['A'],
-            choiceB=set_a_choice_map['B'],
-            choiceC=set_a_choice_map['C'],
-            choiceD=set_a_choice_map['D'],
-            choiceE=set_a_choice_map['E'],
-        )
+        set_a_id = f"{board_exam_name}_{uuid.uuid4().hex[:6]}"
+        set_b_id = f"{board_exam_name}_{uuid.uuid4().hex[:6]}"
 
-        TestKey.objects.create(
-            set_id=set_b_id,
-            board_exam=board_exam_name,
-            subject=subject_name,
-            questions=questions_set_b,
-            choiceA=set_b_choice_map['A'],
-            choiceB=set_b_choice_map['B'],
-            choiceC=set_b_choice_map['C'],
-            choiceD=set_b_choice_map['D'],
-            choiceE=set_b_choice_map['E'],
-        )
+        # 💾 SAVE TO FIRESTORE (instead of SQL)
+        db.collection("test_keys").document(set_a_id).set({
+            "set_id": set_a_id,
+            "board_exam": board_exam_name,
+            "subject": subject_name,
+            "questions": questions_set_a,
+            "choices": {q["id"]: q["choices"] for q in questions_set_a},
+            "created_at": firestore.SERVER_TIMESTAMP
+        })
 
+        db.collection("test_keys").document(set_b_id).set({
+            "set_id": set_b_id,
+            "board_exam": board_exam_name,
+            "subject": subject_name,
+            "questions": questions_set_b,
+            "choices": {q["id"]: q["choices"] for q in questions_set_b},
+            "created_at": firestore.SERVER_TIMESTAMP
+        })
 
-        # Save AnswerKey objects
-        AnswerKey.objects.create(
-            set_id=set_a_id,
-            board_exam=board_exam_name,
-            subject=subject_name,
-            answer_key=set_a_answer_key
-        )
-        AnswerKey.objects.create(
-            set_id=set_b_id,
-            board_exam=board_exam_name,
-            subject=subject_name,
-            answer_key=set_b_answer_key
-        )
+        # 🔑 SAVE ANSWER KEYS
+        db.collection("answer_keys").document(set_a_id).set({
+            "set_id": set_a_id,
+            "answer_key": set_a_answer_key
+        })
 
-        # Render PDFs
+        db.collection("answer_keys").document(set_b_id).set({
+            "set_id": set_b_id,
+            "answer_key": set_b_answer_key
+        })
+
+        # 📄 RENDER PDF
         context_a = {
-            'board_exam': board_exam_name,
-            'subject': subject_name,
-            'questions': questions_set_a,
-            'set_name': "Set A",
-            'set_id': set_a_id,
-            'answer_key': set_a_answer_key,
-            'logo_path': '',  # optional logo path
+            "board_exam": board_exam_name,
+            "subject": subject_name,
+            "questions": questions_set_a,
+            "set_name": "Set A",
+            "set_id": set_a_id,
+            "answer_key": set_a_answer_key,
         }
+
         context_b = {
-            'board_exam': board_exam_name,
-            'subject': subject_name,
-            'questions': questions_set_b,
-            'set_name': "Set B",
-            'set_id': set_b_id,
-            'answer_key': set_b_answer_key,
-            'logo_path': '',
+            "board_exam": board_exam_name,
+            "subject": subject_name,
+            "questions": questions_set_b,
+            "set_name": "Set B",
+            "set_id": set_b_id,
+            "answer_key": set_b_answer_key,
         }
 
-        html_a = render_to_string('pdf_template.html', context_a, request=request)
-        html_b = render_to_string('pdf_template.html', context_b, request=request)
+        html_a = render_to_string("pdf_template.html", context_a, request=request)
+        html_b = render_to_string("pdf_template.html", context_b, request=request)
 
-        pdf_a = HTML(string=html_a, base_url=request.build_absolute_uri('/')).write_pdf()
-        pdf_b = HTML(string=html_b, base_url=request.build_absolute_uri('/')).write_pdf()
+        pdf_a = HTML(string=html_a).write_pdf()
+        pdf_b = HTML(string=html_b).write_pdf()
 
-        # ZIP the PDFs
         zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-            zip_file.writestr(f"generated_test_set_a_{set_a_id}.pdf", pdf_a)
-            zip_file.writestr(f"generated_test_set_b_{set_b_id}.pdf", pdf_b)
 
-        response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
-        response['Content-Disposition'] = 'attachment; filename="generated_tests.zip"'
+        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+            zip_file.writestr(f"{set_a_id}.pdf", pdf_a)
+            zip_file.writestr(f"{set_b_id}.pdf", pdf_b)
+
+        response = HttpResponse(zip_buffer.getvalue(), content_type="application/zip")
+        response["Content-Disposition"] = "attachment; filename=tests.zip"
         return response
 
     except Exception as e:
-        print("❌ ERROR in download_test_pdf:", traceback.format_exc())
-        return HttpResponse(f"An error occurred: {str(e)}", status=500)
-
-def download_test_interface(request):
-    test_keys = TestKey.objects.all().order_by('-id')
-    return render(request, 'download_test.html', {'test_keys': test_keys})
-
+        return HttpResponse(str(e), status=500)
 
 def download_existing_test_pdf(request):
-    set_id = request.GET.get('set_id')
+
+    set_id = request.GET.get("set_id")
+
     if not set_id:
-        return HttpResponse("No test selected.", status=400)
+        return HttpResponse("No test selected", status=400)
 
     try:
-        test = TestKey.objects.get(set_id=set_id)
-        questions_data = test.questions or []
+        test_doc = db.collection("test_keys").document(set_id).get()
+        answer_doc = db.collection("answer_keys").document(set_id).get()
 
-        # Pass questions exactly as saved in TestKey
-        pdf_questions = []
-        for q in questions_data:
-            pdf_questions.append({
-                'question': q.get('question', ''),
-                'choices': q.get('choices', []),   # keep list of dicts with letter & text
-                'image_url': q.get('image_url', None)
-            })
+        if not test_doc.exists:
+            return HttpResponse("Test not found", status=404)
 
-        answer_obj = AnswerKey.objects.filter(set_id=set_id).first()
-        answer_key = answer_obj.answer_key if answer_obj else {}
+        test = test_doc.to_dict()
+        answer_key = answer_doc.to_dict().get("answer_key", {}) if answer_doc.exists else {}
 
         context = {
-            'board_exam': test.board_exam,
-            'subject': test.subject,
-            'questions': pdf_questions,
-            'set_name': test.set_id,
-            'set_id': test.set_id,
-            'answer_key': answer_key,
-            'logo_path': '',  # optional logo
+            "board_exam": test.get("board_exam"),
+            "subject": test.get("subject"),
+            "questions": test.get("questions"),
+            "set_name": set_id,
+            "set_id": set_id,
+            "answer_key": answer_key,
         }
 
-        html_content = render_to_string('pdf_template.html', context, request=request)
-        pdf_file = HTML(string=html_content, base_url=request.build_absolute_uri('/')).write_pdf()
+        html = render_to_string("pdf_template.html", context)
+        pdf = HTML(string=html).write_pdf()
 
-        response = HttpResponse(pdf_file, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="test_{test.set_id}.pdf"'
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{set_id}.pdf"'
         return response
 
     except Exception as e:
-        print("❌ ERROR in download_existing_test_pdf:", traceback.format_exc())
-        return HttpResponse(f"Error: {str(e)}", status=500)
+        return HttpResponse(str(e), status=500)
 
 
 
 
 ####################### FOR UPLOADING MOODLE XML FILE (QUESTIONS) TO THE QUESTION BANK  ##############################
 
+from firebase_admin import firestore
+from google.cloud import storage
+import os, base64, re, uuid
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import InMemoryUploadedFile
+
+db = firestore.client()
+
+storage_client = storage.Client()
+BUCKET_NAME = "exim-media-concrete-potion-477505-p2"
+bucket = storage_client.bucket(BUCKET_NAME)
+
+
 def strip_tags(html):
-    # Regular expression to remove HTML tags
     return re.sub('<[^<]+?>', '', html)
 
-def extract_and_save_questions(xml_file, subject):
-    # Parse the XML file
-    tree = ET.parse(xml_file)
-    root = tree.getroot()
 
-    # Iterate over each question
-    for question in root.findall('.//question'):
-        print("Processing question...")
-        # Check if 'questiontext' tag exists
-        question_text_element = question.find('questiontext')
-        if question_text_element is not None:
-            # Extract question text and image data
-            question_text, image_file = extract_question_text_and_image(question_text_element, subject)
-            print('question:', question_text)
-            print("Image File:", image_file)
-        else:
-            question_text = ''
-            image_file = None
-            print("No 'questiontext' found for this question.") 
-
-        # Print image file for debugging
-        print("Image File:", image_file)
-        print('question:', question_text)
-        # Initialize variables to store correct answer and choices
-        correct_answer = ''
-        choices = [''] * 5  # Initialize with empty strings
-
-        # Map the correct answer to its corresponding letter (A to E)
-        answer_letter_map = {}
-
-        # Check if question has multiple choices
-        answers = question.findall('answer')
-        if len(answers) < 2:
-            # Skip this question if it doesn't have multiple choices
-            continue
-
-        # Iterate over each answer
-        for i, answer in enumerate(answers):
-            text = strip_tags(answer.find('text').text.strip())
-            fraction = int(answer.get('fraction'))
-            if fraction == 100:
-                # Extract the correct answer and map it to the corresponding letter
-                correct_answer = chr(65 + i)  # A corresponds to 65 in ASCII
-            # Map the choices to letters (A to E)
-            # choices[i] = f'{chr(65 + i)}. {text}'
-            choices[i] = f'{text}'
-
-        # Skip this question if both question text and choices are empty
-        if not any([question_text, any(choices)]):
-            continue
-
-        # Save the image file to the local directory and get its path
-        if image_file:
-            image_path = save_image_locally(image_file)
-            print("Image Path:", image_path)
-        else:
-            image_path = None
-
-        # Print image path for debugging
-        print("Image Path:", image_path)
-
-        # Create an instance of your Django model and save it to the database
-        question_instance = Question.objects.create(
-            subject=subject,
-            question_text=question_text,
-            image=image_path,
-            choiceA=choices[0],
-            choiceB=choices[1],
-            choiceC=choices[2],
-            choiceD=choices[3],
-            choiceE=choices[4],
-            correct_answer=correct_answer
-        )
-
-
-def extract_question_text_and_image(question_text_element, subject):
-    question_text = ''
-    image_files = None
-
-    # Check if the 'text' tag exists under 'questiontext'
-    text_element = question_text_element.find('./text')
-    if text_element is not None:
-        # Extract the text content between <p> and </p> tags, or between <p> and <img> tags if present
-        text_content = text_element.text.strip()
-        if text_content:
-            # Extract text between <p> and <img> tags
-            match = re.search(r'<p>(.*?)<img', text_content)
-            if match:
-                question_text = match.group(1).strip()
-            else:
-                # Extract text between <p> and </p> tags if <img> tag is not present
-                match = re.search(r'<p>(.*?)</p>', text_content)
-                if match:
-                    question_text = match.group(1).strip()
-
-        # Check if there are file tags
-        file_elements = question_text_element.findall('./file')
-        for file_element in file_elements:
-            image_name = file_element.get('name')
-            if image_name.endswith('.png') or image_name.endswith('.jpg'):
-                # Decode the base64 content of the file element
-                file_content_base64 = file_element.text.strip()
-                file_data = base64.b64decode(file_content_base64)
-                # Create an InMemoryUploadedFile object for the image
-                image_file = InMemoryUploadedFile(
-                    ContentFile(file_data),
-                    None,
-                    image_name,  # Use the file name as the image name
-                    'image/jpeg',  # Assuming the image is JPEG format
-                    len(file_data),
-                    None
-                )
-    else:
-        print("No 'text' tag found under 'questiontext'.")
-
-    return question_text, image_file
-
-
-
-
-def save_image_locally(image_file):
-    # Get the media directory
-    media_dir = os.path.join(settings.MEDIA_ROOT, 'question_images')
-    # Ensure the media directory exists
-    os.makedirs(media_dir, exist_ok=True)
-    # Construct the filename without the '/media/' part
-    _, filename = os.path.split(image_file.name)
-    # Save the image file to the media directory
-    image_path = os.path.join(media_dir, filename)
-    with open(image_path, 'wb') as f:
-        f.write(image_file.read())
-    # return image_path
-    return os.path.join('question_images', filename)  # Return the relative path
-
-
-def upload_xml(request):
-    print(request.FILES)  # Print the contents of request.FILES
-    if request.method == 'POST' and 'xml_file' in request.FILES:
-        xml_file = request.FILES['xml_file']
-        subject = request.POST.get('subject') 
-        extract_and_save_questions(xml_file, subject)
-        return HttpResponse("XML file uploaded. Questions are successfully stored in Question Bank.")
-    return render(request, 'upload_xml.html')
-
-# -----------------------------------------
-# TEXT EXTRACTORS
-# -----------------------------------------
-
-def extract_pdf_text(file):
-    reader = PyPDF2.PdfReader(file)
-    text = ""
-    for page in reader.pages:
-        p = page.extract_text() or ""
-        text += p + "\n"
-    return text
-
-def extract_text_from_docx(file):
-    doc = Document(file)
-    return "\n".join([p.text for p in doc.paragraphs])
-
-def extract_text_from_txt(file):
-    return file.read().decode("utf-8", errors="ignore")
-
-# -----------------------------------------
-# SAVE QUESTION
-# -----------------------------------------
-
-def save_question(
+def save_question_firestore(
     question_text,
     choices,
-    image_filename,
+    image_file,
     level,
     source,
     subject_name,
     topic_name,
-    board_exam_list=None,
-    image_files=None
+    board_exam_list=None
 ):
-    # Ensure difficulty is uppercase
-    level = str(level).strip().upper()
 
-    print("DEBUG: save_question called for:", question_text[:80], "LEVEL=", level)
+    # upload image to Cloud Storage
+    image_url = None
+    if image_file:
+        blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
+        blob.upload_from_file(image_file)
+        blob.make_public()
+        image_url = blob.public_url
 
-    difficulty, _ = DifficultyLevel.objects.get_or_create(level=level)
-
-    subject_obj, _ = Subject.objects.get_or_create(name=(subject_name or "").strip())
-    topic_obj = None
-    if topic_name:
-        topic_obj, _ = Topic.objects.get_or_create(name=topic_name.strip(), subject=subject_obj)
-
-    q = Question.objects.create(
-        subject=subject_obj,
-        topic=topic_obj,
-        difficulty=difficulty,
-        source=(source or "google.com"),
-        question_text=question_text,
-    )
-
-    print("DEBUG: Question created id=", q.id)
-
-    # Board Exams
-    if board_exam_list:
-        for be in board_exam_list:
-            if be:
-                exam, _ = BoardExam.objects.get_or_create(name=str(be).strip())
-                q.board_exams.add(exam)
-
-    # Choices
+    # build choices
+    formatted_choices = []
     for letter, (text, is_correct) in (choices or {}).items():
-        text = (text or "").strip()
         if text:
-            Choice.objects.create(question=q, text=text, is_correct=bool(is_correct))
+            formatted_choices.append({
+                "text": text.strip(),
+                "is_correct": bool(is_correct)
+            })
 
-    # Attach image if matched
-    if image_filename and image_files:
-        target = os.path.basename(str(image_filename)).lower()
-        for fname, fobj in image_files.items():
-            if os.path.basename(fname).lower() == target:
-                QuestionImage.objects.create(question=q, image=fobj)
-                break
+    # FIRESTORE DOCUMENT
+    db.collection("questions").add({
+        "question_text": question_text,
+        "choices": formatted_choices,
+        "correct_letter": next(
+            (chr(65 + i) for i, c in enumerate(formatted_choices) if c.get("is_correct")),
+            None
+        ),
+        "image": image_url,
+        "difficulty": level,
+        "source": source,
+        "subject": subject_name,
+        "topic": topic_name,
+        "board_exams": board_exam_list or [],
+        "usage_count": 0,
+        "created_at": firestore.SERVER_TIMESTAMP
+    })
 
-    return q
+def extract_and_save_questions(xml_file, subject):
+
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+
+    for question in root.findall('.//question'):
+
+        question_text_element = question.find('questiontext')
+
+        if question_text_element is not None:
+            question_text, image_file = extract_question_text_and_image(
+                question_text_element,
+                subject
+            )
+        else:
+            question_text = ""
+            image_file = None
+
+        answers = question.findall('answer')
+        if len(answers) < 2:
+            continue
+
+        correct_answer = None
+        choices = {}
+        image_path = None
+
+        for i, answer in enumerate(answers):
+            text = strip_tags(answer.find('text').text.strip())
+            fraction = int(answer.get('fraction'))
+
+            letter = chr(65 + i)
+
+            if fraction == 100:
+                correct_answer = letter
+
+            choices[letter] = (text, fraction == 100)
+
+        if image_file:
+            image_path = save_image_locally(image_file)
+
+        save_question_firestore(
+            question_text=question_text,
+            choices=choices,
+            image_file=image_file,
+            level="E",
+            source="xml_import",
+            subject_name=subject,
+            topic_name="",
+            board_exam_list=None
+        )
+
+def extract_question_text_and_image(question_text_element, subject):
+
+    question_text = ""
+    image_file = None
+
+    text_element = question_text_element.find('./text')
+
+    if text_element is not None:
+        text_content = text_element.text or ""
+
+        match = re.search(r'<p>(.*?)<img', text_content)
+        if match:
+            question_text = match.group(1).strip()
+        else:
+            match = re.search(r'<p>(.*?)</p>', text_content)
+            if match:
+                question_text = match.group(1).strip()
+
+    file_elements = question_text_element.findall('./file')
+
+    for file_element in file_elements:
+        image_name = file_element.get('name')
+
+        if image_name.endswith(('.png', '.jpg')):
+
+            file_data = base64.b64decode(file_element.text.strip())
+
+            image_file = InMemoryUploadedFile(
+                ContentFile(file_data),
+                None,
+                image_name,
+                'image/jpeg',
+                len(file_data),
+                None
+            )
+
+    return question_text, image_file
+
+def save_image_locally(image_file):
+
+    media_dir = os.path.join("media", "question_images")
+    os.makedirs(media_dir, exist_ok=True)
+
+    _, filename = os.path.split(image_file.name)
+    path = os.path.join(media_dir, filename)
+
+    with open(path, "wb") as f:
+        f.write(image_file.read())
+
+    return path
 
 
-# -----------------------------------------
-# PARSE TXT / DOCX / PDF (all text-based formats)
-# -----------------------------------------
+def upload_xml(request):
+
+    if request.method == "POST" and "xml_file" in request.FILES:
+
+        xml_file = request.FILES["xml_file"]
+        subject = request.POST.get("subject")
+
+        extract_and_save_questions(xml_file, subject)
+
+        return HttpResponse("XML uploaded successfully (Firestore)")
+
+    return render(request, "upload_xml.html")
 
 def parse_txt(text, image_files, subject_name, topic_name):
-    print("DEBUG: parse_txt called, length=", len(text or ""))
 
-    lines = [l.rstrip() for l in (text or "").splitlines()]
+    lines = (text or "").splitlines()
     i = 0
     source = "google.com"
 
-    ALL_LEVELS = ["VE", "E", "M", "D", "VD"]
-
     while i < len(lines):
+
         line = lines[i].strip()
 
         if not line:
             i += 1
             continue
 
-        # Source line (applies to all following questions)
         if line.startswith("Source:"):
             source = line.replace("Source:", "").strip()
             i += 1
             continue
 
-        # Start of question
         if line.startswith("<Q>"):
+
             question_text = line.replace("<Q>", "").strip()
             i += 1
 
             choices = {}
-            image_filename = None
+            image_file = None
             difficulty = "E"
             board_exam_list = []
 
-            # Read until next <Q> or EOF
-            while i < len(lines) and not lines[i].strip().startswith("<Q>"):
+            while i < len(lines) and not lines[i].startswith("<Q>"):
+
                 l = lines[i].strip()
-                if not l:
-                    i += 1
-                    continue
 
-                # Image line
                 if l.startswith("Img:"):
-                    image_filename = l.replace("Img:", "").strip()
-                    i += 1
-                    continue
+                    image_file = l.replace("Img:", "").strip()
 
-                # Correct answer >>>X.
-                if l.startswith(">>>"):
-                    rest = l[3:].lstrip()
-                    if rest:
-                        letter = rest[0].upper()
-                        after = rest[1:].lstrip()
-                        if after.startswith("."):
-                            after = after[1:].lstrip()
-                        choices[letter] = (after, True)
-                    i += 1
-                    continue
+                elif l.startswith(">>>"):
+                    letter = l[3].strip()[0].upper()
+                    text = l[4:].strip()
+                    choices[letter] = (text, True)
 
-                # Normal choices A. B. C. D. E.
-                if len(l) >= 2 and l[1] == ".":
+                elif len(l) > 1 and l[1] == ".":
                     letter = l[0].upper()
-                    choices[letter] = (l[2:].strip(), False)
-                    i += 1
-                    continue
+                    text = l[2:].strip()
+                    choices[letter] = (text, False)
 
-                # Difficulty
-                if l.upper() in ALL_LEVELS:
+                elif l.upper() in ["VE","E","M","D","VD"]:
                     difficulty = l.upper()
-                    i += 1
-
-                    # NEXT LINE IS BOARD EXAM LIST
-                    if i < len(lines):
-                        be_line = lines[i].strip()
-                        if be_line and "," in be_line:  # basic validation
-                            board_exam_list = [x.strip() for x in be_line.split(",")]
-                            i += 1
-
-                    continue
 
                 i += 1
 
-            # SAVE QUESTION
-            save_question(
-                question_text=question_text,
-                choices=choices,
-                image_filename=image_filename,
-                level=difficulty,
-                source=source,
-                subject_name=subject_name,
-                topic_name=topic_name,
-                board_exam_list=board_exam_list,
-                image_files=image_files
+            save_question_firestore(
+                question_text,
+                choices,
+                None,
+                difficulty,
+                source,
+                subject_name,
+                topic_name,
+                board_exam_list
             )
-            continue
 
         i += 1
-
 
 
 # -----------------------------------------
