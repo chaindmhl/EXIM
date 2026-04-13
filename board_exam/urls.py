@@ -5,6 +5,8 @@ from .views import Add_Question, signup
 from . import views
 from rest_framework.routers import DefaultRouter
 
+#test
+from .views import test_firestore
 
 router = DefaultRouter()
 # Register any viewsets with router here if needed
@@ -13,6 +15,7 @@ router = DefaultRouter()
 urlpatterns = [
     # Root goes to home
     path('', views.root_redirect, name='root'),
+    path("test-firestore/", test_firestore),
 
     # Authentication / user
     path('signup/', views.signup, name='signup'),
