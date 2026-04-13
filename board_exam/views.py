@@ -43,8 +43,8 @@ from django.views.decorators.http import require_http_methods
 import datetime
 import openai
 from datetime import datetime
-from services.question_service import get_questions
 from scripts.model_loader import get_original_model, get_cropped_model
+from services.user_service import UserService
 
 def firebase_login_required(view_func):
     def wrapper(request, *args, **kwargs):
@@ -54,18 +54,6 @@ def firebase_login_required(view_func):
     return wrapper
 
 logo_path = os.path.join(settings.BASE_DIR, 'static', 'EXIM2.png')  # full path
-# SET_ID_PREFIX = {
-#     "Civil Engineering": "CE",
-#     "Mechanical Engineering": "ME",
-#     "Electronics Engineering": "ECE",
-#     "Electrical Engineering": "EE",
-# }
-
-from django.shortcuts import render, redirect
-from django.http import JsonResponse, HttpResponseForbidden
-from django.contrib import messages
-from django.views.decorators.csrf import csrf_protect
-from django.contrib.auth.decorators import login_required
 
 from firebase_admin import firestore, auth
 
@@ -111,18 +99,27 @@ def signup(request):
 
             uid = user_record.uid
 
-            # 2. Create Firestore user profile
-            db.collection("users").document(uid).set({
-                "email": email,
-                "role": role,
-                "first_name": form.cleaned_data.get('first_name', ''),
-                "last_name": form.cleaned_data.get('last_name', ''),
-                "middle_name": form.cleaned_data.get('middle_name', ''),
-                "student_id": form.cleaned_data.get('student_id', ''),
-                "course": form.cleaned_data.get('course', ''),
-                "birthdate": str(form.cleaned_data.get('birthdate', '')),
-                "created_at": firestore.SERVER_TIMESTAMP
-            })
+            uid = user_record.uid
+
+            UserService.create_user(
+                user_id=uid,
+                email=email,
+                is_student=(role == "student"),
+                is_staff=(role == "teacher")
+            )
+            
+            if role == "student":
+                UserService.create_student(uid, {
+                    "first_name": form.cleaned_data.get("first_name"),
+                    "last_name": form.cleaned_data.get("last_name"),
+                    "course": form.cleaned_data.get("course"),
+                })
+            
+            elif role == "teacher":
+                UserService.create_teacher(uid, {
+                    "first_name": form.cleaned_data.get("first_name"),
+                    "last_name": form.cleaned_data.get("last_name"),
+                })
 
             messages.success(request, "Account created successfully!")
             return redirect('login')
@@ -184,7 +181,7 @@ def get_user_role(request):
     if not uid:
         return None
 
-    user_doc = db.collection("users").document(uid).get()
+    user_data = UserService.get_user(uid)
 
     if user_doc.exists:
         return user_doc.to_dict().get("role")
@@ -197,7 +194,8 @@ def get_user_role(request):
 # =========================
 @firebase_login_required
 def main_dashboard(request):
-    role = request.session.get("role")
+    user = UserService.get_user(request.session["uid"]) 
+    role = user.get("role")
 
     if role == "teacher":
         return redirect("home")
@@ -212,7 +210,8 @@ def main_dashboard(request):
 # =========================
 @firebase_login_required
 def home(request):
-    role = request.session.get("role")
+    user = UserService.get_user(request.session["uid"]) 
+    role = user.get("role")
 
     if role != "teacher":
         return HttpResponseForbidden("You cannot access this page")
@@ -225,7 +224,8 @@ def home(request):
 # =========================
 @firebase_login_required
 def home_student(request):
-    role = request.session.get("role")
+    user = UserService.get_user(request.session["uid"]) 
+    role = user.get("role")
 
     if role != "student":
         return HttpResponseForbidden("You cannot access this page")
@@ -240,7 +240,8 @@ def root_redirect(request):
     if not request.session.get("uid"):
         return redirect("login")
 
-    role = request.session.get("role")
+    user = UserService.get_user(request.session["uid"]) 
+    role = user.get("role")
 
     if role == "teacher":
         return redirect("home")
