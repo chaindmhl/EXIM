@@ -901,17 +901,56 @@ def parse_txt(text, image_files, subject_name, topic_name):
 # PARSE XLSX
 # -----------------------------------------
 
-def parse_xlsx(df, image_map=None, subject=None, topic=None):
-    """
-    Parse an XLSX DataFrame and save all questions to the database using save_question().
-    """
-    # Normalize column names
-    normalized_cols = {"".join(str(c).lower().replace("\xa0","").split()): c for c in df.columns}
-    def get_col(name):
-        key = "".join(name.lower().replace("\xa0","").split())
-        return normalized_cols.get(key, None)
+def save_question_firestore(
+    question_text,
+    choices,
+    image_file,
+    level,
+    source,
+    subject_name,
+    topic_name,
+    board_exam_list=None
+):
 
-    # Map columns
+    # Upload image to Cloud Storage
+    image_url = None
+    if image_file:
+        blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
+        blob.upload_from_file(image_file)
+        blob.make_public()
+        image_url = blob.public_url
+
+    formatted_choices = []
+    for letter, (text, is_correct) in (choices or {}).items():
+        if text:
+            formatted_choices.append({
+                "text": text.strip(),
+                "is_correct": bool(is_correct)
+            })
+
+    db.collection("questions").add({
+        "question_text": question_text,
+        "choices": formatted_choices,
+        "image": image_url,
+        "difficulty": level,
+        "source": source,
+        "subject": subject_name,
+        "topic": topic_name,
+        "board_exams": board_exam_list or [],
+        "created_at": firestore.SERVER_TIMESTAMP
+    })
+
+def parse_xlsx(df, image_map=None, subject=None, topic=None):
+
+    normalized_cols = {
+        "".join(str(c).lower().replace("\xa0", "").split()): c
+        for c in df.columns
+    }
+
+    def get_col(name):
+        key = "".join(name.lower().replace("\xa0", "").split())
+        return normalized_cols.get(key)
+
     q_col = get_col("question")
     a_col = get_col("choicea")
     b_col = get_col("choiceb")
@@ -924,142 +963,149 @@ def parse_xlsx(df, image_map=None, subject=None, topic=None):
     src_col = get_col("source")
     be_col = get_col("boardexam")
 
-    print("DEBUG XLSX columns mapping:", normalized_cols)
-    print("DEBUG Board Exam column:", be_col)
-
     for _, row in df.iterrows():
+
         question_text = str(row.get(q_col, "")).strip() if q_col else ""
         source = str(row.get(src_col, "")).strip() if src_col else "google.com"
         level = str(row.get(lvl_col, "")).strip().upper() if lvl_col else "E"
+
         image = str(row.get(img_col, "")).strip() if img_col else ""
+
         if image_map and image in image_map:
             image = image_map[image]
 
-        # Choices
+        # choices
         choices_raw = {
-            "A": str(row.get(a_col,"")).strip() if a_col else "",
-            "B": str(row.get(b_col,"")).strip() if b_col else "",
-            "C": str(row.get(c_col,"")).strip() if c_col else "",
-            "D": str(row.get(d_col,"")).strip() if d_col else "",
-            "E": str(row.get(e_col,"")).strip() if e_col else "",
+            "A": str(row.get(a_col, "")).strip() if a_col else "",
+            "B": str(row.get(b_col, "")).strip() if b_col else "",
+            "C": str(row.get(c_col, "")).strip() if c_col else "",
+            "D": str(row.get(d_col, "")).strip() if d_col else "",
+            "E": str(row.get(e_col, "")).strip() if e_col else "",
         }
 
-        # Correct answer
-        correct = str(row.get(ans_col,"")).strip().upper() if ans_col else ""
-        choices = {letter: (text, letter==correct) for letter, text in choices_raw.items() if text}
+        correct = str(row.get(ans_col, "")).strip().upper() if ans_col else ""
 
-        # Board exams
+        choices = {
+            k: (v, k == correct)
+            for k, v in choices_raw.items()
+            if v
+        }
+
+        # board exams
         board_exam_list = []
-        if be_col and pd.notna(row.get(be_col, "")):
-            raw_be = str(row[be_col])
-            clean_be = re.sub(r"[\s\xa0]+", " ", raw_be)
-            parts = [p.strip() for p in clean_be.split(",") if p.strip()]
-            board_exam_list = [p.upper() for p in parts]
+        if be_col and pd.notna(row.get(be_col)):
+            raw = str(row[be_col])
+            parts = [p.strip().upper() for p in raw.split(",") if p.strip()]
+            board_exam_list = parts
 
-        # Ensure non-None
-        board_exam_list = board_exam_list or []
-        choices = choices or {}
-
-        print("DEBUG Question:", question_text[:50])
-        print("DEBUG Board Exams:", board_exam_list)
-        print("DEBUG Correct Answer:", correct)
-        print("DEBUG Choices:", choices)
-
-        # Save the question
-        save_question(
+        save_question_firestore(
             question_text=question_text,
             choices=choices,
-            image_filename=image,
+            image_file=image,
             level=level,
             source=source,
             subject_name=subject,
             topic_name=topic,
-            board_exam_list=board_exam_list,
-            image_files=image_map
+            board_exam_list=board_exam_list
         )
 
-# -------------------------------
-# UPLOAD VIEW
-# -------------------------------
 def upload_file(request):
-    if request.method == 'POST':
-        uploaded_items = request.FILES.getlist('folder_upload')
-        subject = request.POST.get('subject')
-        topic = request.POST.get('topic')
+
+    if request.method == "POST":
+
+        uploaded_items = request.FILES.getlist("folder_upload")
+        subject = request.POST.get("subject")
+        topic = request.POST.get("topic")
 
         main_file = None
         image_map = {}
 
-        # Separate main file and images
+        # split files
         for f in uploaded_items:
-            ext = os.path.splitext(f.name)[1].lower()
-            if ext in ['.docx', '.pdf', '.txt', '.xlsx']:
+            ext = f.name.lower().split(".")[-1]
+
+            if ext in ["pdf", "docx", "txt", "xlsx"]:
                 main_file = f
-            elif ext in ['.jpg', '.jpeg', '.png']:
+            elif ext in ["jpg", "jpeg", "png"]:
                 image_map[os.path.basename(f.name)] = f
 
         if not main_file:
-            return HttpResponse("<script>alert('No main file found!');</script>")
+            return HttpResponse("No main file found")
 
-        ext = os.path.splitext(main_file.name)[1].lower()
+        ext = main_file.name.lower().split(".")[-1]
 
         try:
-            if ext == '.pdf':
+
+            if ext == "pdf":
                 text = extract_pdf_text(main_file)
                 parse_txt(text, image_map, subject, topic)
-            elif ext == '.docx':
+
+            elif ext == "docx":
                 text = extract_text_from_docx(main_file)
                 parse_txt(text, image_map, subject, topic)
-            elif ext == '.txt':
+
+            elif ext == "txt":
                 text = extract_text_from_txt(main_file)
                 parse_txt(text, image_map, subject, topic)
-            elif ext == '.xlsx':
+
+            elif ext == "xlsx":
                 df = pd.read_excel(main_file)
-                parse_and_save_xlsx(df, image_map=image_map, subject=subject, topic=topic)
+                parse_xlsx(df, image_map=image_map, subject=subject, topic=topic)
+
             else:
-                return HttpResponse("<script>alert('Invalid file type.');</script>")
+                return HttpResponse("Invalid file type")
 
         except Exception as e:
-            print("ERROR:", e)
-            return HttpResponse(f"<script>alert('Error: {str(e)}');</script>")
+            return HttpResponse(f"Error: {str(e)}")
 
-        # Redirect safely to question bank page
-        from django.urls import reverse
-        redirect_url = reverse('question_bank')  # replace with your URL name
-        return redirect(redirect_url)
+        return redirect("question_bank")
 
-    # GET request – render upload page
-    context = {
-        'BOARD_EXAMS': list(BOARD_EXAM_TOPICS.keys()),
-        'BOARD_EXAM_TOPICS_JSON': json.dumps(BOARD_EXAM_TOPICS),
-        'LEVELS_JSON': json.dumps(LEVELS),
-    }
-    return render(request, 'upload_file.html', context)
+    return render(request, "upload_file.html")
+
 
 
 ####################### FOR UPLOADING AND CHECKING OF ANSWER SHEET (IMAGE) ##############################
+from firebase_admin import firestore
+
+db = firestore.client()
 
 def get_exam_id_suggestions(request):
-    input_text = request.GET.get('input', '')
+    input_text = request.GET.get('input', '').lower()
 
-    # Filter AnswerKey objects based on partial match of input_text
-    suggestions = AnswerKey.objects.filter(set_id__icontains=input_text).values_list('set_id', flat=True)
+    docs = db.collection("answer_keys").stream()
 
-    return JsonResponse(list(suggestions), safe=False)
+    suggestions = []
+    for doc in docs:
+        if input_text in doc.id.lower():
+            suggestions.append(doc.id)
+
+    return JsonResponse(suggestions, safe=False)
 
 def get_subjects(request):
-    subjects = TestKey.objects.values_list('subject', flat=True).distinct()
-    return JsonResponse({'subjects': list(subjects)})
+    docs = db.collection("test_keys").stream()
+
+    subjects = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+        if "subject" in data:
+            subjects.add(data["subject"])
+
+    return JsonResponse({"subjects": list(subjects)})
 
 def get_testkeys_by_subject(request):
     subject = request.GET.get('subject')
+
     testkeys = []
+
     if subject:
-        testkeys = list(
-            AnswerKey.objects.filter(subject=subject)
-            .values_list('set_id', flat=True)
-        )
-    return JsonResponse({'testkeys': testkeys})
+        docs = db.collection("answer_keys") \
+                  .where("subject", "==", subject) \
+                  .stream()
+
+        testkeys = [doc.id for doc in docs]
+
+    return JsonResponse({"testkeys": testkeys})
 
 def download_answer_page(request):
     return render(request, 'download_answer_key.html')
@@ -1069,10 +1115,27 @@ def download_exam_results_page(request):
 
 def get_exam_dates_by_board_exam(request):
     board_exam = request.GET.get('board_exam')
-    dates = TestKey.objects.filter(board_exam=board_exam).values_list('exam_date', flat=True).distinct()
-    # Convert to MMMM-YYYY
-    formatted_dates = [d.strftime("%B-%Y") for d in dates]
-    return JsonResponse({'dates': formatted_dates})
+
+    docs = db.collection("test_keys") \
+              .where("board_exam", "==", board_exam) \
+              .stream()
+
+    dates = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+        if "exam_date" in data:
+            # expected ISO string or timestamp
+            try:
+                dt = data["exam_date"]
+                if isinstance(dt, str):
+                    dt = datetime.fromisoformat(dt)
+
+                dates.add(dt.strftime("%B-%Y"))
+            except:
+                pass
+
+    return JsonResponse({"dates": list(dates)})
 
 def get_subjects_by_board_exam_and_date(request):
     board_exam = request.GET.get('board_exam')
@@ -1081,104 +1144,141 @@ def get_subjects_by_board_exam_and_date(request):
     month, year = exam_date.split('-')
     month_num = datetime.strptime(month, "%B").month
 
-    subjects = (
-        TestKey.objects
-        .filter(
-            board_exam=board_exam,
-            exam_date__month=month_num,
-            exam_date__year=int(year)
-        )
-        .values_list('subject', flat=True)
-        .distinct()
-    )
+    docs = db.collection("test_keys") \
+              .where("board_exam", "==", board_exam) \
+              .stream()
+
+    subjects = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+
+        if "exam_date" in data:
+            dt = data["exam_date"]
+
+            if isinstance(dt, str):
+                dt = datetime.fromisoformat(dt)
+
+            if dt.month == month_num and dt.year == int(year):
+                subjects.add(data.get("subject"))
 
     return JsonResponse({"subjects": list(subjects)})
 
 
 def view_answer_key(request):
     exam_id = request.GET.get('exam_id')
-    answer_key = get_object_or_404(AnswerKey, set_id=exam_id)
+
+    doc = db.collection("answer_keys").document(exam_id).get()
+
+    if not doc.exists:
+        return JsonResponse({"error": "Not found"})
 
     return render(request, 'view_answer_key.html', {
-        'exam_id': exam_id,
-        'answer_key': answer_key.answer_key
+        "exam_id": exam_id,
+        "answer_key": doc.to_dict().get("answer_key", {})
     })
-
+    
 def download_answer_key(request):
-    exam_id = request.GET.get('exam_id', None)
+    exam_id = request.GET.get('exam_id')
 
-    if exam_id is None:
+    if not exam_id:
         return JsonResponse({'error': 'Exam ID is required'})
 
-    answer_key = AnswerKey.objects.filter(set_id=exam_id).first()
+    doc = db.collection("answer_keys").document(exam_id).get()
 
-    if answer_key is None:
-        return JsonResponse({'error': 'Answer key not found for the provided exam ID'})
+    if not doc.exists:
+        return JsonResponse({'error': 'Answer key not found'})
 
-    # Generate file name
-    file_name = f'answer_key_{exam_id}.txt'
+    data = doc.to_dict()
 
-    # Create readable text format
+    file_name = f"answer_key_{exam_id}.txt"
+
     answer_key_str = (
-        f"Board Exam/Course: {answer_key.board_exam}\n"
-        f"Subject: {answer_key.subject}\n"
-        # f"Topic: {answer_key.topic}\n"
-        f"Test Key: {answer_key.set_id}\n"
+        f"Board Exam/Course: {data.get('board_exam')}\n"
+        f"Subject: {data.get('subject')}\n"
+        f"Test Key: {exam_id}\n"
         f"{'-'*40}\n"
-        + '\n'.join([f'{key}: {value}' for key, value in answer_key.answer_key.items()])
+        + '\n'.join([f"{k}: {v}" for k, v in data.get("answer_key", {}).items()])
     )
 
-    # Return as downloadable text file
     response = HttpResponse(answer_key_str, content_type='text/plain')
     response['Content-Disposition'] = f'attachment; filename="{file_name}"'
     return response
 
-
 # Get distinct board exams
 def get_board_exams(request):
-    exams = list(BoardExam.objects.values_list('name', flat=True))
-    return JsonResponse({'board_exams': exams})
+    docs = db.collection("board_exams").stream()
+    exams = [doc.id for doc in docs]
+
+    return JsonResponse({"board_exams": exams})
 
 
 # Get distinct subjects by board exam
 def get_subjects_by_board_exam(request):
     board_exam = request.GET.get('board_exam')
-    subjects = []
-    if board_exam:
-        subjects = list(
-            Question.objects.filter(board_exams__name=board_exam)
-            .values_list('subject__name', flat=True)
-            .distinct()
-        )
-    return JsonResponse({'subjects': subjects})
+
+    docs = db.collection("questions") \
+              .where("board_exams", "array_contains", board_exam) \
+              .stream()
+
+    subjects = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+        subjects.add(data.get("subject"))
+
+    return JsonResponse({"subjects": list(subjects)})
 
 
 # Get distinct topics by subject
 def get_topics_by_subject(request):
     subject = request.GET.get('subject')
-    topics = []
-    if subject:
-        topics = list(
-            Question.objects.filter(subject=subject)
-            .values_list('topic', flat=True)
-            .distinct()
-        )
-    return JsonResponse({'topics': topics})
+
+    docs = db.collection("questions") \
+              .where("subject", "==", subject) \
+              .stream()
+
+    topics = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+        topics.add(data.get("topic"))
+
+    return JsonResponse({"topics": list(topics)})
 
 
 # Get test keys by topic (from AnswerKey)
 def get_testkeys_by_topic(request):
     topic = request.GET.get('topic')
+
+    docs = db.collection("questions") \
+              .where("topic", "==", topic) \
+              .stream()
+
+    subject = None
+    for doc in docs:
+        subject = doc.to_dict().get("subject")
+        break
+
     testkeys = []
-    if topic:
-        # If your AnswerKey has 'subject' field, we can match it to Question.subject of this topic
-        subject = Question.objects.values_list('subject', flat=True).first()
-        if subject:
-            testkeys = list(
-                AnswerKey.objects.filter(subject=subject)
-                .values_list('set_id', flat=True)
-            )
-    return JsonResponse({'testkeys': testkeys})
+
+    if subject:
+        keys = db.collection("answer_keys") \
+                 .where("subject", "==", subject) \
+                 .stream()
+
+        testkeys = [doc.id for doc in keys]
+
+    return JsonResponse({"testkeys": testkeys})
+
+from firebase_admin import firestore
+from datetime import datetime
+from django.http import JsonResponse, HttpResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+db = firestore.client()
+
 
 def download_exam_results(request):
     subject = request.GET.get('subject')
@@ -1194,26 +1294,36 @@ def download_exam_results(request):
     except ValueError:
         return JsonResponse({'error': 'Invalid exam date format'})
 
-    # 🔹 Get all SET IDs for same subject + date
-    exam_ids = TestKey.objects.filter(
-        subject=subject,
-        exam_date__month=month_num,
-        exam_date__year=year
-    ).values_list('set_id', flat=True)
+    # 🔥 STEP 1: Get matching test_keys from Firestore
+    test_docs = db.collection("test_keys") \
+        .where("subject", "==", subject) \
+        .stream()
 
-    if not exam_ids.exists():
+    exam_ids = []
+    board_exam = None
+
+    for doc in test_docs:
+        data = doc.to_dict()
+
+        dt = data.get("exam_date")
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt)
+
+        if dt and dt.month == month_num and dt.year == year:
+            exam_ids.append(doc.id)
+            board_exam = data.get("board_exam", board_exam)
+
+    if not exam_ids:
         return JsonResponse({'error': 'No exams found for this subject/date'})
 
-    # 🔹 Merge results across all sets
-    results = Result.objects.filter(
-        exam_id__in=exam_ids
-    ).order_by('student_name')
+    # 🔥 STEP 2: Get results for those exam_ids
+    results_docs = db.collection("results") \
+        .where("exam_id", "in", exam_ids[:10])  # Firestore limit safety
 
-    if not results.exists():
+    results = list(results_docs.stream())
+
+    if not results:
         return JsonResponse({'message': 'No results yet for this subject/date.'})
-
-    # 🔹 Board exam (take from TestKey)
-    board_exam = TestKey.objects.filter(set_id__in=exam_ids).first().board_exam
 
     # ================== EXCEL GENERATION ==================
     wb = Workbook()
@@ -1221,7 +1331,7 @@ def download_exam_results(request):
     ws.title = f"{subject} Results"
 
     ws["A1"] = "Board Exam:"
-    ws["B1"] = board_exam
+    ws["B1"] = board_exam or "-"
     ws["A2"] = "Subject:"
     ws["B2"] = subject
     ws["A3"] = "Exam Date:"
@@ -1244,12 +1354,14 @@ def download_exam_results(request):
         cell.fill = header_fill
         cell.border = thin_border
 
-    # 🔹 Data rows
-    for result in results:
+    # 🔥 STEP 3: Write results
+    for doc in results:
+        data = doc.to_dict()
+
         ws.append([
-            result.student_name,
-            result.score,
-            result.exam_id   # optional but useful
+            data.get("student_name", ""),
+            data.get("score", 0),
+            data.get("exam_id", "")
         ])
 
     # Styling
@@ -1266,10 +1378,11 @@ def download_exam_results(request):
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    filename = f"Results_for_{board_exam}_Board_Exam-{subject}-{exam_date}.xlsx"
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    wb.save(response)
 
+    filename = f"Results_{subject}_{exam_date}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    wb.save(response)
     return response
 
 
@@ -1288,113 +1401,48 @@ def image_to_mask(image):
     
     return mask
 
-# def upload_answer(request):
-#     if request.method == 'POST' and request.FILES.get('image'):
-#         uploaded_image = request.FILES['image']
-#         exam_id = request.POST.get('exam_id')
 
-#         # Retrieve answer key
-#         answer_key = get_object_or_404(AnswerKey, set_id=exam_id)
-#         subject = answer_key.subject
-
-#         # Convert uploaded image to OpenCV format
-#         nparr = np.frombuffer(uploaded_image.read(), np.uint8)
-#         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-#         # Convert to mask
-#         mask = image_to_mask(image)
-
-#         # Save mask to media folder
-#         unique_filename = f'mask_{int(time.time())}_{uuid.uuid4()}.jpg'
-#         mask_dir = os.path.join(settings.BASE_DIR, 'media', 'mask_images')
-#         os.makedirs(mask_dir, exist_ok=True)
-#         mask_path = os.path.join(mask_dir, unique_filename)
-#         cv2.imwrite(mask_path, mask)
-
-#         # Load mask for detection
-#         mask_image = cv2.imread(mask_path)
-
-#         # Reference point for distance calculations
-#         reference_point = (0, 0)
-
-#         # --- DETECTION PIPELINE ---
-
-#         # 1. Detect objects with original model
-#         boxes_original, _, class_ids_original = detect_objects(mask_image, net_original, classes_original)
-
-#         # 2. For each detected 'answer' object, crop and detect with second model
-#         for i, box in enumerate(boxes_original):
-#             class_name_original = classes_original[class_ids_original[i]]
-#             if class_name_original != 'answer':
-#                 continue  # skip non-answer boxes
-
-#             x, y, w, h = box
-#             cropped_object = mask_image[y:y+h, x:x+w]
-
-#             # Detect objects in cropped answer box
-#             boxes_cropped, _, class_ids_cropped = detect_objects(cropped_object, net_cropped, classes_cropped)
-
-#             # Sort by distance
-#             object_dict = sort_objects_by_distance(boxes_cropped, class_ids_cropped, classes_cropped, reference_point)
-
-#             # Group and assign sequence numbers
-#             grouped_boxes = group_and_sequence(object_dict.values(), object_dict.keys())
-
-#             # Map seq_num → class
-#             seq_num_class_dict = {}
-#             for seq_num, i in grouped_boxes.items():
-#                 class_name = classes_cropped[class_ids_cropped[i - 1]]
-#                 seq_num_class_dict[seq_num] = class_name
-
-#             # --- SCORE CALCULATION ---
-#             correct_answers = {str(k): v['letter'] for k, v in answer_key.answer_key.items()}
-#             score = sum(
-#                 1 for seq_num, submitted in seq_num_class_dict.items()
-#                 if correct_answers.get(str(seq_num)) == submitted
-#             )
-
-#             # --- SAVE TO DB ---
-#             student = get_object_or_404(Student, user_id=request.user)
-
-#             if Result.objects.filter(user=request.user, exam_id=exam_id).exists():
-#                 return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
-
-#             Result.objects.create(
-#                 user=request.user,
-#                 student_id=student.student_id,
-#                 course=student.course,
-#                 student_name=student,
-#                 subject=subject,
-#                 exam_id=exam_id,
-#                 answer=[seq_num_class_dict[k] for k in sorted(seq_num_class_dict.keys())],
-#                 correct_answer=list(correct_answers.values()),
-#                 score=score,
-#                 is_submitted=True
-#             )
-
-#             return JsonResponse({'score': score})
-
-#         return JsonResponse({'error': 'No answer class detected in image.'})
-
-#     return render(request, 'upload_answer.html')
 def upload_answer(request):
     if request.method == 'POST' and request.FILES.get('image'):
+
         uploaded_image = request.FILES['image']
         exam_id = request.POST.get('exam_id')
 
-        # --- LOAD MODELS (FROM model_loader.py) ---
+        # --- LOAD MODELS ---
         net_original, classes_original = get_original_model()
         net_cropped, classes_cropped = get_cropped_model()
 
-        # --- GET ANSWER KEY ---
-        answer_key = get_object_or_404(AnswerKey, set_id=exam_id)
-        subject = answer_key.subject
+        # --- GET ANSWER KEY (FIRESTORE) ---
+        answer_doc = db.collection("answer_keys").document(exam_id).get()
 
-        # --- DECODE IMAGE ---
+        if not answer_doc.exists:
+            return JsonResponse({"error": "Answer key not found"})
+
+        answer_key_data = answer_doc.to_dict()
+        subject = answer_key_data.get("subject")
+        correct_answers = {
+            str(k): v['letter']
+            for k, v in answer_key_data.get("answer_key", {}).items()
+        }
+
+        # --- GET STUDENT (FIRESTORE instead of Django model) ---
+        uid = request.user.id  # or Firebase UID if using Firebase Auth
+
+        student_doc = db.collection("students").document(str(uid)).get()
+
+        if not student_doc.exists:
+            return JsonResponse({"error": "Student not found"})
+
+        student = student_doc.to_dict()
+        student_id = student.get("student_id")
+        course = student.get("course")
+        student_name = student.get("last_name", "") + " " + student.get("first_name", "")
+
+        # --- IMAGE DECODE ---
         nparr = np.frombuffer(uploaded_image.read(), np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # --- MASK (OLD BEHAVIOR, NO RESIZE) ---
+        # --- MASK ---
         mask_image = image_to_mask(image)
 
         if mask_image.ndim == 2:
@@ -1402,9 +1450,9 @@ def upload_answer(request):
 
         reference_point = (0, 0)
 
-        # ===============================
-        # DETECT ANSWER BOXES (ORIGINAL)
-        # ===============================
+        # =========================
+        # DETECTION PIPELINE
+        # =========================
         boxes_original, _, class_ids_original = detect_objects(
             mask_image, net_original, classes_original
         )
@@ -1418,9 +1466,6 @@ def upload_answer(request):
             x, y, w, h = box
             cropped_object = mask_image[y:y+h, x:x+w]
 
-            # ===========================
-            # DETECT BUBBLES (CROPPED)
-            # ===========================
             boxes_cropped, _, class_ids_cropped = detect_objects(
                 cropped_object, net_cropped, classes_cropped
             )
@@ -1443,18 +1488,12 @@ def upload_answer(request):
                     class_ids_cropped[idx - 1]
                 ]
 
-            # --- PRESERVE OLD ORDER ---
             for k in sorted(seq_num_class_dict):
                 all_answers.append(seq_num_class_dict[k])
 
-        # ===============================
-        # SCORE COMPUTATION (FLEXIBLE)
-        # ===============================
-        correct_answers = {
-            str(k): v['letter']
-            for k, v in answer_key.answer_key.items()
-        }
-
+        # =========================
+        # SCORING
+        # =========================
         score = sum(
             1 for i, a in enumerate(all_answers, start=1)
             if correct_answers.get(str(i)) == a
@@ -1462,36 +1501,43 @@ def upload_answer(request):
 
         total_items = len(correct_answers)
 
-        student = get_object_or_404(Student, user_id=request.user)
+        # =========================
+        # CHECK DUPLICATE
+        # =========================
+        results_ref = db.collection("results") \
+            .where("uid", "==", str(uid)) \
+            .where("exam_id", "==", exam_id) \
+            .stream()
 
-        if Result.objects.filter(user=request.user, exam_id=exam_id).exists():
+        if any(results_ref):
             return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
 
-        # ===============================
-        # SAVE RESULT ONLY (NO IMAGES)
-        # ===============================
-        Result.objects.create(
-            user=request.user,
-            student_id=student.student_id,
-            course=student.course,
-            student_name=student,
-            subject=subject,
-            exam_id=exam_id,
-            answer=all_answers,
-            correct_answer=list(correct_answers.values()),
-            score=score,
-            total_items=total_items,
-            is_submitted=True
-        )
+        # =========================
+        # SAVE RESULT (FIRESTORE)
+        # =========================
+        db.collection("results").add({
+            "uid": str(uid),
+            "student_id": student_id,
+            "course": course,
+            "student_name": student_name,
+            "subject": subject,
+            "exam_id": exam_id,
+            "answer": all_answers,
+            "correct_answer": list(correct_answers.values()),
+            "score": score,
+            "total_items": total_items,
+            "is_submitted": True,
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
 
-        # --- CLEANUP ---
+        # cleanup
         del image, mask_image, cropped_object
         gc.collect()
 
         return JsonResponse({
-            'score': score,
-            'detected': len(all_answers),
-            'total_items': total_items
+            "score": score,
+            "detected": len(all_answers),
+            "total_items": total_items
         })
 
     return render(request, 'upload_answer.html')
@@ -1502,11 +1548,11 @@ def answer_sheet_view(request):
     if request.method == 'POST':
         form = AnswerSheetForm(request.POST)
         if form.is_valid():
-            # Process the form data and save it to the database
-            # Redirect to a success page or render a confirmation message
-            pass  # Placeholder for processing form data
+            # TODO: optionally save to Firestore later
+            pass
     else:
         form = AnswerSheetForm()
+
     return render(request, 'answer_sheet.html', {'form': form})
 
 def online_answer_test(request):
@@ -1517,15 +1563,13 @@ def online_answer_test(request):
     board_exam = request.POST.get('board_exam')
     exam_date_str = timezone.now().strftime("%b%Y")
 
-
     set_a_id = f"{board_exam}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
     set_b_id = f"{board_exam}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
-
 
     set_a_question_ids = request.POST.getlist('set_a_question_ids[]')
     set_b_question_ids = request.POST.getlist('set_b_question_ids[]')
 
-    # Build questions and answer keys using existing helpers
+    # Build questions using your existing helpers
     questions_set_a = get_questions_with_choices(set_a_question_ids)
     questions_set_b = get_questions_with_choices(set_b_question_ids)
 
@@ -1535,66 +1579,83 @@ def online_answer_test(request):
     set_a_choice_map = extract_choices_by_letter(questions_set_a)
     set_b_choice_map = extract_choices_by_letter(questions_set_b)
 
-    # Save TestKey & AnswerKey
-    if not TestKey.objects.filter(set_id=set_a_id).exists():
-        TestKey.objects.create(
-            set_id=set_a_id,
-            board_exam=board_exam,
-            subject=subject,
-            questions=questions_set_a,
-            choiceA=set_a_choice_map['A'],
-            choiceB=set_a_choice_map['B'],
-            choiceC=set_a_choice_map['C'],
-            choiceD=set_a_choice_map['D'],
-            choiceE=set_a_choice_map['E']
-        )
-        AnswerKey.objects.create(
-            set_id=set_a_id,
-            board_exam=board_exam,
-            subject=subject,
-            answer_key=set_a_answer_key
-        )
+    # -----------------------------
+    # FIRESTORE SAVE (testKeys)
+    # -----------------------------
+    db.collection("testKeys").document(set_a_id).set({
+        "set_id": set_a_id,
+        "board_exam": board_exam,
+        "subject": subject,
+        "questions": questions_set_a,
+        "choiceA": set_a_choice_map.get("A", []),
+        "choiceB": set_a_choice_map.get("B", []),
+        "choiceC": set_a_choice_map.get("C", []),
+        "choiceD": set_a_choice_map.get("D", []),
+        "choiceE": set_a_choice_map.get("E", [])
+    })
 
-    if not TestKey.objects.filter(set_id=set_b_id).exists():
-        TestKey.objects.create(
-            set_id=set_b_id,
-            board_exam=board_exam,
-            subject=subject,
-            questions=questions_set_b,
-            choiceA=set_b_choice_map['A'],
-            choiceB=set_b_choice_map['B'],
-            choiceC=set_b_choice_map['C'],
-            choiceD=set_b_choice_map['D'],
-            choiceE=set_b_choice_map['E']
-        )
-        AnswerKey.objects.create(
-            set_id=set_b_id,
-            board_exam=board_exam,
-            subject=subject,
-            answer_key=set_b_answer_key
-        )
+    db.collection("testKeys").document(set_b_id).set({
+        "set_id": set_b_id,
+        "board_exam": board_exam,
+        "subject": subject,
+        "questions": questions_set_b,
+        "choiceA": set_b_choice_map.get("A", []),
+        "choiceB": set_b_choice_map.get("B", []),
+        "choiceC": set_b_choice_map.get("C", []),
+        "choiceD": set_b_choice_map.get("D", []),
+        "choiceE": set_b_choice_map.get("E", [])
+    })
 
-    # Prepare questions for preview (optional)
-    set_a_questions_choices = questions_set_a
-    set_b_questions_choices = questions_set_b
+    # -----------------------------
+    # FIRESTORE SAVE (answerKeys)
+    # -----------------------------
+    db.collection("answerKeys").document(set_a_id).set({
+        "set_id": set_a_id,
+        "board_exam": board_exam,
+        "subject": subject,
+        "answer_key": set_a_answer_key
+    })
 
+    db.collection("answerKeys").document(set_b_id).set({
+        "set_id": set_b_id,
+        "board_exam": board_exam,
+        "subject": subject,
+        "answer_key": set_b_answer_key
+    })
+
+    # -----------------------------
+    # RETURN RESPONSE (no DB query)
+    # -----------------------------
     return render(request, 'answer_test.html', {
         'subject': subject,
         'board_exam': board_exam,
-        'set_a_questions_choices': set_a_questions_choices,
-        'set_b_questions_choices': set_b_questions_choices,
+        'set_a_questions_choices': questions_set_a,
+        'set_b_questions_choices': questions_set_b,
         'set_a_id': set_a_id,
         'set_b_id': set_b_id,
     })
 
 
 
-def answer_test_preview(request, subject, board_exam, set_a_id, set_b_id):
-    test_a = TestKey.objects.get(set_id=set_a_id)
-    test_b = TestKey.objects.get(set_id=set_b_id)
+from firebase_admin import firestore
+from django.shortcuts import render
 
-    answer_a = AnswerKey.objects.get(set_id=set_a_id)
-    answer_b = AnswerKey.objects.get(set_id=set_b_id)
+db = firestore.client()
+
+
+def answer_test_preview(request, subject, board_exam, set_a_id, set_b_id):
+
+    # -----------------------
+    # GET TEST KEYS
+    # -----------------------
+    test_a = db.collection("testKeys").document(set_a_id).get().to_dict()
+    test_b = db.collection("testKeys").document(set_b_id).get().to_dict()
+
+    # -----------------------
+    # GET ANSWER KEYS
+    # -----------------------
+    answer_a = db.collection("answerKeys").document(set_a_id).get().to_dict()
+    answer_b = db.collection("answerKeys").document(set_b_id).get().to_dict()
 
     return render(request, 'answer_test.html', {
         'subject': subject,
@@ -1609,55 +1670,122 @@ def answer_test_preview(request, subject, board_exam, set_a_id, set_b_id):
 ####################### FOR ANSWERING ONLINE ##############################
 
 import random
+import json
+from firebase_admin import firestore
+
+db = firestore.client()
+
 
 def answer_online_exam(request):
-    testkeys = TestKey.objects.all()
+
+    # -----------------------
+    # GET ALL TEST KEYS
+    # -----------------------
+    testkeys = db.collection("testKeys").stream()
+
     data = {}
 
     for tk in testkeys:
-        board = tk.board_exam
-        exam_date = tk.exam_date
-        month_key = exam_date.strftime("%Y-%m")
-        subject = tk.subject
+        tk_data = tk.to_dict()
 
-        # Initialize dicts
+        board = tk_data.get("board_exam")
+        exam_date_raw = tk_data.get("exam_date")  # MUST exist in Firestore
+        subject = tk_data.get("subject")
+
+        if not board or not exam_date_raw or not subject:
+            continue
+
+        # Convert Firestore timestamp or string
+        if hasattr(exam_date_raw, "strftime"):
+            month_key = exam_date_raw.strftime("%Y-%m")
+            year = exam_date_raw.year
+            month = exam_date_raw.month
+        else:
+            # if stored as string "YYYY-MM-DD"
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(exam_date_raw)
+                month_key = dt.strftime("%Y-%m")
+                year = dt.year
+                month = dt.month
+            except:
+                continue
+
+        # -----------------------
+        # INIT STRUCTURE
+        # -----------------------
         data.setdefault(board, {})
         data[board].setdefault(month_key, {})
 
         if subject not in data[board][month_key]:
-            # Get all sets for this board, subject, and month
-            sets_for_subject = TestKey.objects.filter(
-                board_exam=board,
-                subject=subject,
-                exam_date__year=exam_date.year,
-                exam_date__month=exam_date.month
-            )
-            random_set = random.choice(list(sets_for_subject))
+
+            # -----------------------
+            # FILTER SAME GROUP
+            # -----------------------
+            sets_query = db.collection("testKeys") \
+                .where("board_exam", "==", board) \
+                .where("subject", "==", subject)
+
+            sets_for_subject = [s.to_dict() for s in sets_query.stream()]
+
+            if not sets_for_subject:
+                continue
+
+            random_set = random.choice(sets_for_subject)
+
             data[board][month_key][subject] = {
-                "set_id": random_set.set_id,
-                "subject_group": random_set.subject_group
+                "set_id": random_set.get("set_id"),
+                "subject_group": random_set.get("subject_group", None)
             }
 
     return render(
         request,
         "answer_online_exam.html",
         {
-            "board_exams": data.keys(),
+            "board_exams": list(data.keys()),
             "exam_data_json": json.dumps(data),
         }
     )
 
 from django.utils.dateparse import parse_datetime
 
+from firebase_admin import firestore
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+import random, string, uuid
+
+db = firestore.client()
+
+
 def exam_form(request, set_id):
-    test_key = get_object_or_404(TestKey, set_id=set_id)
-    student = get_object_or_404(Student, user=request.user)
+
+    # ===============================
+    # GET TEST KEY (FIRESTORE)
+    # ===============================
+    test_ref = db.collection("testKeys").document(set_id).get()
+
+    if not test_ref.exists:
+        return redirect("answer_online_exam")
+
+    test_key = test_ref.to_dict()
+
+    # ===============================
+    # GET STUDENT (FIRESTORE or DJANGO HYBRID)
+    # ===============================
+    student_ref = db.collection("students").document(str(request.user.id)).get()
+
+    if not student_ref.exists:
+        return redirect("login")
+
+    student = student_ref.to_dict()
 
     # ===============================
     # ACCESS CONTROL
     # ===============================
-    student_course = student.course.strip().lower()
-    exam_code = test_key.board_exam.strip().upper()
+    student_course = (student.get("course") or "").strip().lower()
+    exam_code = (test_key.get("board_exam") or "").strip().upper()
 
     if "civil engineering" in student_course:
         allowed_exam = "CE"
@@ -1677,36 +1805,48 @@ def exam_form(request, set_id):
     # ===============================
     # PREVENT DOUBLE SUBMISSION
     # ===============================
-    result = Result.objects.filter(user=request.user, subject=test_key.subject).first()
+    results_query = db.collection("results") \
+        .where("user_id", "==", str(request.user.id)) \
+        .where("subject", "==", test_key.get("subject")) \
+        .stream()
 
-    if result and result.is_submitted:
-        messages.error(request, "You have already submitted this subject.")
-        return redirect("warning_page")
+    result = next(results_query, None)
 
-    # reset session flag only if no result exists
-    if not result:
-        request.session.pop("form_submitted", None)
+    if result:
+        result_data = result.to_dict()
+        if result_data.get("is_submitted"):
+            messages.error(request, "You have already submitted this subject.")
+            return redirect("warning_page")
 
     # ===============================
     # PREPARE QUESTIONS
     # ===============================
     question_choices = []
-    letters = list(string.ascii_uppercase)[:5]  # A–E
+    letters = list(string.ascii_uppercase)[:5]
 
-    for i, question in enumerate(test_key.questions):
+    questions = test_key.get("questions", [])
+    choiceA = test_key.get("choiceA", [])
+    choiceB = test_key.get("choiceB", [])
+    choiceC = test_key.get("choiceC", [])
+    choiceD = test_key.get("choiceD", [])
+    choiceE = test_key.get("choiceE", [])
+
+    for i, question in enumerate(questions):
+
         question_text = question.get("question_text") or question.get("question")
         image_url = question.get("image_url") or question.get("image") or ""
 
         choice_texts = [
-            test_key.choiceA[i],
-            test_key.choiceB[i],
-            test_key.choiceC[i],
-            test_key.choiceD[i],
-            test_key.choiceE[i],
+            choiceA[i] if i < len(choiceA) else "",
+            choiceB[i] if i < len(choiceB) else "",
+            choiceC[i] if i < len(choiceC) else "",
+            choiceD[i] if i < len(choiceD) else "",
+            choiceE[i] if i < len(choiceE) else "",
         ]
 
         random.shuffle(choice_texts)
         choices = list(zip(letters, choice_texts))
+
         question_choices.append((question_text, choices, image_url))
 
     total_items = len(question_choices)
@@ -1725,110 +1865,118 @@ def exam_form(request, set_id):
             messages.error(request, "You have already submitted this exam.")
             return redirect("warning_page")
 
-        # -------- Collect answers --------
         submitted_answers = []
+
         for i in range(total_items):
             ans = request.POST.get(f"question_{i + 1}")
+
             if not ans:
-                messages.error(
-                    request, f"Please select an answer for question {i + 1}."
-                )
-                return render(
-                    request,
-                    "exam_form.html",
-                    {
-                        "test_key": test_key,
-                        "question_choices": question_choices,
-                        "total_items": total_items,
-                        "total_time_limit": total_time_limit,
-                        "per_question_time_limit": per_question_time_limit,
-                        "start_time": timezone.now().isoformat(),
-                    },
-                )
+                messages.error(request, f"Please select an answer for question {i + 1}")
+
+                return render(request, "exam_form.html", {
+                    "test_key": test_key,
+                    "question_choices": question_choices,
+                    "total_items": total_items,
+                    "total_time_limit": total_time_limit,
+                    "per_question_time_limit": per_question_time_limit,
+                    "start_time": timezone.now().isoformat(),
+                })
+
             submitted_answers.append(ans)
 
-        # -------- Elapsed time (FIXED) --------
+        # ===============================
+        # ELAPSED TIME
+        # ===============================
         elapsed_time = None
         start_time_str = request.POST.get("start_time")
 
         if start_time_str:
             start_time = parse_datetime(start_time_str)
-            if start_time and timezone.is_naive(start_time):
-                start_time = timezone.make_aware(start_time)
-
             if start_time:
                 elapsed_td = timezone.now() - start_time
+
                 h, r = divmod(int(elapsed_td.total_seconds()), 3600)
                 m, s = divmod(r, 60)
+
                 elapsed_time = f"{h}hr {m}min {s}sec"
 
-        # mark session submitted
         request.session["form_submitted"] = True
 
-        # -------- Scoring --------
-        score = 0
-        answer_key = get_object_or_404(AnswerKey, set_id=set_id)
-        answer_key_dict = answer_key.answer_key
+        # ===============================
+        # SCORING (FIRESTORE ANSWER KEY)
+        # ===============================
+        answer_ref = db.collection("answerKeys").document(set_id).get()
 
+        if not answer_ref.exists:
+            return redirect("warning_page")
+
+        answer_key = answer_ref.to_dict().get("answer_key", {})
+
+        score = 0
         correct_text_answers = []
 
-        for i, key in enumerate(sorted(answer_key_dict.keys(), key=int)):
-            correct_text = answer_key_dict[key].get("text", "")
+        for i, key in enumerate(sorted(answer_key.keys(), key=int)):
+            correct_text = answer_key[key].get("text", "")
             correct_text_answers.append(correct_text)
 
-            if submitted_answers[i] == correct_text:
+            if i < len(submitted_answers) and submitted_answers[i] == correct_text:
                 score += 1
 
-        # -------- Save result --------
-        try:
-            result = Result.objects.create(
-                user=request.user,
-                student_id=student.student_id,
-                course=student.course,
-                student_name=str(student),
-                subject=test_key.subject,
-                exam_id=set_id,
-                answer=submitted_answers,
-                correct_answer=correct_text_answers,
-                score=score,
-                total_items=total_items,
-                is_submitted=True,
-                timestamp=timezone.now(),
-                elapsed_time=elapsed_time,
-            )
+        # ===============================
+        # SAVE RESULT (FIRESTORE)
+        # ===============================
+        result_id = str(uuid.uuid4())
 
-            return redirect("result_page", result_id=result.id)
+        db.collection("results").document(result_id).set({
+            "user_id": str(request.user.id),
+            "student_id": student.get("student_id"),
+            "course": student.get("course"),
+            "student_name": student.get("name"),
+            "subject": test_key.get("subject"),
+            "exam_id": set_id,
+            "answer": submitted_answers,
+            "correct_answer": correct_text_answers,
+            "score": score,
+            "total_items": total_items,
+            "is_submitted": True,
+            "timestamp": timezone.now().isoformat(),
+            "elapsed_time": elapsed_time
+        })
 
-        except IntegrityError:
-            messages.error(request, "There was an error saving your result.")
-            return redirect("warning_page")
+        return redirect("result_page", result_id=result_id)
 
     # ===============================
     # GET REQUEST
     # ===============================
-    return render(
-        request,
-        "exam_form.html",
-        {
-            "test_key": test_key,
-            "question_choices": question_choices,
-            "total_items": total_items,
-            "total_time_limit": total_time_limit,
-            "per_question_time_limit": per_question_time_limit,
-            "start_time": timezone.now().isoformat(),
-        },
-    )
-
+    return render(request, "exam_form.html", {
+        "test_key": test_key,
+        "question_choices": question_choices,
+        "total_items": total_items,
+        "total_time_limit": total_time_limit,
+        "per_question_time_limit": per_question_time_limit,
+        "start_time": timezone.now().isoformat(),
+    })
 
 
 def result_page(request, result_id):
-    result = Result.objects.get(id=result_id)
+
+    result_ref = db.collection("results").document(result_id).get()
+
+    if not result_ref.exists:
+        return render(request, "result_page.html", {"error": "Result not found"})
+
+    result = result_ref.to_dict()
+
     percent = 0
-    if result.total_items:
-        percent = round((result.score / result.total_items) * 100, 2)
-    return render(request, 'result_page.html', {
-        'result': result,
-        'percent': percent
+    if result.get("total_items"):
+        percent = round(
+            (result.get("score", 0) / result.get("total_items")) * 100,
+            2
+        )
+
+    return render(request, "result_page.html", {
+        "result": result,
+        "percent": percent
     })
 
 
@@ -1836,133 +1984,168 @@ def warning_page(request):
     home_student_url = reverse('home_student')  # Assuming 'home_student' is the name of the URL pattern for home_student.html
     return render(request, 'submit_warning.html', {'home_student_url': home_student_url})
 
-@login_required
 def view_results(request):
-    # Get the results for the logged-in user only
-    user_results = Result.objects.filter(user=request.user).order_by('-timestamp')
-    return render(request, 'view_results.html', {'results': user_results})
 
+    user_id = str(request.user.id)
+
+    results_query = db.collection("results") \
+        .where("user_id", "==", user_id) \
+        .stream()
+
+    results = [r.to_dict() for r in results_query]
+
+    # sort by timestamp (latest first)
+    results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+    return render(request, "view_results.html", {
+        "results": results
+    })
+    
 def question_analytics(request):
-    # Fetch all questions with related data
-    questions = Question.objects.prefetch_related(
-        'board_exams',
-        'subjects'
-    ).select_related(
-        'difficulty'
-    )
+
+    questions = db.collection("questions").stream()
 
     board_exam_counts = {}
     subject_counts = {}
     difficulty_counts = {}
 
     for q in questions:
-        board_exams = list(q.board_exams.all())
-        subjects = list(q.subjects.all())
+        data = q.to_dict()
+
+        board_exams = data.get("board_exams", [])
+        subjects = data.get("subjects", [])
+        difficulty = data.get("difficulty", "Unknown Difficulty")
 
         if not board_exams:
-            board_exams = [None]
+            board_exams = ["No Board Exam"]
 
         if not subjects:
-            subjects = [None]
+            subjects = ["Unknown Subject"]
 
-        # Count per board exam
+        # -------------------
+        # BOARD EXAM COUNTS
+        # -------------------
         for be in board_exams:
-            be_name = be.name if be else "No Board Exam"
-            board_exam_counts[be_name] = board_exam_counts.get(be_name, 0) + 1
+            board_exam_counts[be] = board_exam_counts.get(be, 0) + 1
 
             for subj in subjects:
-                subject_name = subj.name if subj else "Unknown Subject"
-                key = (be_name, subject_name)
+                key = (be, subj)
                 subject_counts[key] = subject_counts.get(key, 0) + 1
 
-        # Difficulty count
-        difficulty_name = q.difficulty.level if q.difficulty else "Unknown Difficulty"
-        difficulty_counts[difficulty_name] = difficulty_counts.get(difficulty_name, 0) + 1
+        # -------------------
+        # DIFFICULTY COUNTS
+        # -------------------
+        difficulty_counts[difficulty] = difficulty_counts.get(difficulty, 0) + 1
 
-    # Convert dicts into list of dicts for template
-    course_stats = [{"board_exam": k, "total": v} for k, v in board_exam_counts.items()]
-
-    subject_distribution = [
-        {"board_exam": be, "subject": subj, "total_questions": count}
-        for (be, subj), count in subject_counts.items()
+    # -------------------
+    # FORMAT FOR TEMPLATE
+    # -------------------
+    course_stats = [
+        {"board_exam": k, "total": v}
+        for k, v in board_exam_counts.items()
     ]
 
-    # Chart data
-    course_labels = list(board_exam_counts.keys())
-    total_questions = list(board_exam_counts.values())
-
-    difficulty_labels = list(difficulty_counts.keys())
-    difficulty_values = list(difficulty_counts.values())
+    subject_distribution = [
+        {
+            "board_exam": be,
+            "subject": subj,
+            "total_questions": count
+        }
+        for (be, subj), count in subject_counts.items()
+    ]
 
     context = {
         "course_stats": course_stats,
         "subject_distribution": subject_distribution,
-        "course_labels": json.dumps(course_labels),
-        "total_questions": json.dumps(total_questions),
-        "difficulty_labels": json.dumps(difficulty_labels),
-        "difficulty_counts": json.dumps(difficulty_values),
+
+        "course_labels": json.dumps(list(board_exam_counts.keys())),
+        "total_questions": json.dumps(list(board_exam_counts.values())),
+
+        "difficulty_labels": json.dumps(list(difficulty_counts.keys())),
+        "difficulty_counts": json.dumps(list(difficulty_counts.values())),
     }
 
     return render(request, "question_analytics.html", context)
 
 def test_analytics(request):
-    results = Result.objects.all()
-    courses = results.values_list('course', flat=True).distinct()
+    results_ref = db.collection("results").stream()
+
+    course_results_map = {}
+
+    for doc in results_ref:
+        r = doc.to_dict()
+        course = r.get("course")
+
+        if not course:
+            continue
+
+        course_results_map.setdefault(course, []).append(r)
+
     course_data = {}
 
-    for course in courses:
-        course_results = results.filter(course=course)
+    for course, results in course_results_map.items():
 
-        # Pass/Fail
-        passed_counts = course_results.filter(score__gte=0.6 * F('total_items')).count()
-        failed_counts = course_results.filter(score__lt=0.6 * F('total_items')).count()
+        passed_counts = 0
+        failed_counts = 0
+        total_score = 0
 
-        # Average score
-        avg_score = course_results.aggregate(avg=Avg('score'))['avg'] or 0
-
-        # Per question correct/wrong
         question_stats = defaultdict(lambda: {'correct': 0, 'wrong': 0})
-        for r in course_results:
-            answers = r.answer or []
-            correct_answers = r.correct_answer or []
+
+        for r in results:
+            score = r.get("score", 0)
+            total_items = r.get("total_items", 1)
+
+            if score >= 0.6 * total_items:
+                passed_counts += 1
+            else:
+                failed_counts += 1
+
+            total_score += score
+
+            answers = r.get("answer", []) or []
+            correct_answers = r.get("correct_answer", []) or []
+
             for idx, ans in enumerate(answers):
                 correct_ans = correct_answers[idx] if idx < len(correct_answers) else None
+
                 if ans == correct_ans:
                     question_stats[idx]['correct'] += 1
                 else:
                     question_stats[idx]['wrong'] += 1
 
+        avg_score = total_score / len(results) if results else 0
+
         question_labels = [f'Q{i+1}' for i in range(len(question_stats))]
         correct_counts = [question_stats[i]['correct'] for i in range(len(question_stats))]
         wrong_counts = [question_stats[i]['wrong'] for i in range(len(question_stats))]
 
-        # Top students
-        top_students = course_results.order_by('-score')[:10]
-
-        # Pre-serialize JSON for template
-        passed_json = json.dumps({"passed": passed_counts, "failed": failed_counts})
-        avg_json = json.dumps({"avg": avg_score})
-        question_json = json.dumps({"labels": question_labels, "correct": correct_counts, "wrong": wrong_counts})
+        top_students = sorted(results, key=lambda x: x.get("score", 0), reverse=True)[:10]
 
         course_data[course] = {
-            'passed_counts': passed_counts,
-            'failed_counts': failed_counts,
-            'avg_score': avg_score,
-            'question_labels': question_labels,
-            'correct_counts': correct_counts,
-            'wrong_counts': wrong_counts,
-            'top_students': top_students,
-            'passed_json': passed_json,
-            'avg_json': avg_json,
-            'question_json': question_json
+            "passed_counts": passed_counts,
+            "failed_counts": failed_counts,
+            "avg_score": avg_score,
+            "question_labels": question_labels,
+            "correct_counts": correct_counts,
+            "wrong_counts": wrong_counts,
+            "top_students": top_students,
+            "passed_json": json.dumps({"passed": passed_counts, "failed": failed_counts}),
+            "avg_json": json.dumps({"avg": avg_score}),
+            "question_json": json.dumps({
+                "labels": question_labels,
+                "correct": correct_counts,
+                "wrong": wrong_counts
+            }),
         }
 
-    return render(request, 'test_analytics.html', {'course_data': course_data})
+    return render(request, "test_analytics.html", {
+        "course_data": course_data
+    })
 
 # ---- Practice: start ----
 @require_http_methods(["GET", "POST"])
 def practice_start(request):
-    # 1. Map student's course to exam code
+
     student_course_full = request.user.student.course.strip().lower()
 
     course_mapping = {
@@ -1973,14 +2156,12 @@ def practice_start(request):
     }
 
     student_course_code = course_mapping.get(student_course_full)
+
     if not student_course_code:
         messages.error(request, "Your course is not supported for practice exams.")
-        return redirect("home")  # Or any page
-
-    # 2. Load subjects for this course only
+        return redirect("home")
 
     subjects = list(BOARD_EXAM_TOPICS.get(student_course_code, {}).keys())
-
 
     if request.method == "POST":
         subject_name = request.POST.get("subject")
@@ -1990,49 +2171,55 @@ def practice_start(request):
         except ValueError:
             num_items = 5
 
-        # Filter questions for the student's mapped course + chosen subject
-        qs = Question.objects.filter(
-            board_exams__name=student_course_code,
-            subjects__name=subject_name
-        ).distinct()
+        # =========================
+        # FIRESTORE QUESTION QUERY
+        # =========================
+        questions_ref = db.collection("questions") \
+            .where("board_exams", "array_contains", student_course_code) \
+            .where("subjects", "array_contains", subject_name) \
+            .stream()
 
+        qs = []
+        for doc in questions_ref:
+            q = doc.to_dict()
+            q["id"] = doc.id
+            qs.append(q)
 
-        if not qs.exists():
+        if not qs:
             messages.error(request, "No questions found for this subject!")
             return redirect("practice_start")
 
-        available = qs.count()
+        available = len(qs)
+
         if num_items > available:
             messages.error(request, f"You selected {num_items} but only {available} questions exist!")
             return redirect("practice_start")
 
-        # Random selection
-        questions = list(qs)
-        random.shuffle(questions)
-        chosen = questions[:num_items]
+        random.shuffle(qs)
+        chosen = qs[:num_items]
 
         payload = []
         for q in chosen:
             payload.append({
-                'id': q.id,
-                'text': q.question_text,
-                'image_name': q.images.first().image.name if q.images.exists() else None,
-                'choices': [
-                    {"key": c.id, "text": c.text, "is_correct": c.is_correct} for c in q.choices.all()
-                ],
-                "correct": next((c.text for c in q.choices.all() if c.is_correct), None),
+                "id": q["id"],
+                "text": q.get("question_text"),
+                "image_name": q.get("image_name"),
+                "choices": q.get("choices", []),  # must be stored as list in Firestore
+                "correct": q.get("correct_answer"),
             })
 
         session_id = str(uuid.uuid4())
+
         request.session[f"practice_{session_id}"] = {
             "board_exam": student_course_code,
             "subject": subject_name,
             "questions": payload,
             "total_items": len(payload),
         }
+
         request.session.modified = True
 
-        return redirect('practice_take', session_id=session_id)
+        return redirect("practice_take", session_id=session_id)
 
     return render(request, "practice_start.html", {
         "subjects": subjects,
@@ -2041,313 +2228,371 @@ def practice_start(request):
 
 
 
-
 # ---- Practice: take (render questions + timer) ----
 def practice_take(request, session_id):
+
     sess_key = f'practice_{session_id}'
     data = request.session.get(sess_key)
+
     if not data:
         messages.error(request, "Practice session not found or expired.")
         return redirect('practice_start')
 
-    # pass questions without exposing 'correct' on client (we'll keep a server copy)
-    letters = list(string.ascii_uppercase)  # ['A','B','C','D',...]
+    letters = list(string.ascii_uppercase)
 
     questions_for_client = []
-    for qi, q in enumerate(data['questions'], start=1):
-        choices = q['choices'].copy()
+
+    for qi, q in enumerate(data["questions"], start=1):
+
+        choices = q["choices"].copy()
         random.shuffle(choices)
+
         for idx, choice in enumerate(choices):
-            choice['display_letter'] = letters[idx]
+            choice["display_letter"] = letters[idx]
+
         questions_for_client.append({
-            'instance_id': qi,
-            'q_id': q['id'],
-            'text': q['text'],
-            'image_name': q['image_name'],
-            'choices': choices
+            "instance_id": qi,
+            "q_id": q["id"],
+            "text": q["text"],
+            "image_name": q.get("image_name"),
+            "choices": choices
         })
 
-    context = {
-        'session_id': session_id,
-        'board_exam': data['board_exam'],
-        'questions': questions_for_client,
-        'total_items': data['total_items'],
-        'total_time_limit': data.get('total_time_limit'),
-        'per_question_time_limit': data.get('per_question_time_limit'),
-    }
-    return render(request, 'practice_take.html', context)
+    return render(request, "practice_take.html", {
+        "session_id": session_id,
+        "board_exam": data["board_exam"],
+        "questions": questions_for_client,
+        "total_items": data["total_items"],
+    })
 
 
 
 # ---- Practice: submit (grade & analytics) ----
 @require_http_methods(["POST"])
 def practice_submit(request, session_id):
+
     sess_key = f'practice_{session_id}'
     data = request.session.get(sess_key)
+
     if not data:
         messages.error(request, "Practice session not found or expired.")
         return redirect('practice_start')
 
     questions = data['questions']
     total_items = len(questions)
+
     results = []
     correct_count = 0
     total_time_elapsed = 0.0
 
-    # ---- Analytics temporary containers ----
-    subject_tracker = {}   # {subject: {"correct": x, "total": y, "time": seconds}}
-    topic_tracker = {}     # {topic: {"correct": x, "total": y, "time": seconds}}
-    difficulty_tracker = {}  # {difficulty: {"correct": x, "total": y}}
-    # -----------------------------------------
+    subject_tracker = {}
+    topic_tracker = {}
+    difficulty_tracker = {}
 
+    # =========================
+    # PROCESS ANSWERS
+    # =========================
     for i, q in enumerate(questions, start=1):
+
         ans = request.POST.get(f'answer_{i}')
         time_spent = float(request.POST.get(f'time_{i}', '0') or 0)
 
-        correct_key = q['correct']
+        correct_key = q.get('correct')
         is_correct = (ans == correct_key)
 
-        # Fetch real question object
-        q_obj = Question.objects.get(id=q['id'])
-        subject = q_obj.subjects.first().name if q_obj.subjects.exists() else "Unknown"
-        topic = q_obj.topic.name if q_obj.topic else "Misc"
-        difficulty = q_obj.difficulty.level if q_obj.difficulty else "Unknown"
+        # ---- NO ORM: fetch from session only (or embed metadata in Firestore later)
+        subject = q.get("subject", "Unknown")
+        topic = q.get("topic", "Misc")
+        difficulty = q.get("difficulty", "Unknown")
 
-        # ------- Subject Tracker -------
-        if subject not in subject_tracker:
-            subject_tracker[subject] = {"correct": 0, "total": 0, "time": 0}
+        # ================= SUBJECT TRACKER =================
+        subject_tracker.setdefault(subject, {"correct": 0, "total": 0, "time": 0})
         subject_tracker[subject]["total"] += 1
         subject_tracker[subject]["time"] += time_spent
+
         if is_correct:
             subject_tracker[subject]["correct"] += 1
 
-        # ------- Topic Tracker -------
-        if topic not in topic_tracker:
-            topic_tracker[topic] = {"correct": 0, "total": 0, "time": 0, "subject": subject}
+        # ================= TOPIC TRACKER =================
+        topic_tracker.setdefault(topic, {"correct": 0, "total": 0, "time": 0, "subject": subject})
         topic_tracker[topic]["total"] += 1
         topic_tracker[topic]["time"] += time_spent
+
         if is_correct:
             topic_tracker[topic]["correct"] += 1
 
-        # ------- Difficulty Tracker -------
-        if difficulty not in difficulty_tracker:
-            difficulty_tracker[difficulty] = {"correct": 0, "total": 0}
+        # ================= DIFFICULTY TRACKER =================
+        difficulty_tracker.setdefault(difficulty, {"correct": 0, "total": 0})
         difficulty_tracker[difficulty]["total"] += 1
+
         if is_correct:
             difficulty_tracker[difficulty]["correct"] += 1
 
-        # Count correct answers
         if is_correct:
             correct_count += 1
 
         total_time_elapsed += time_spent
 
         results.append({
-            'index': i,
-            'q_id': q['id'],
-            'text': q['text'],
-            'image_url': q.get('image_url'),
-            'selected': ans,
-            'correct': correct_key,
-            'is_correct': is_correct,
-            'time_spent': time_spent,
+            "index": i,
+            "q_id": q["id"],
+            "text": q["text"],
+            "selected": ans,
+            "correct": correct_key,
+            "is_correct": is_correct,
+            "time_spent": time_spent,
         })
 
-    # Final score
     score = correct_count
     pct = (score / total_items * 100) if total_items else 0
 
-    # ---- Update SUBJECT ANALYTICS with weighted average ----
+    # =========================
+    # FIRESTORE HELPERS
+    # =========================
+    def update_counter(doc_ref, correct, total, time_sum=None):
+        doc = doc_ref.get()
+        if doc.exists:
+            data_old = doc.to_dict()
+        else:
+            data_old = {
+                "total_items_answered": 0,
+                "total_correct": 0,
+                "total_attempts": 0,
+                "average_time_per_item": 0
+            }
+
+        total_items_answered = data_old.get("total_items_answered", 0) + total
+        total_correct = data_old.get("total_correct", 0) + correct
+        total_attempts = data_old.get("total_attempts", 0) + 1
+
+        prev_avg_time = data_old.get("average_time_per_item", 0)
+        prev_total = data_old.get("total_items_answered", 0)
+
+        new_time = (prev_avg_time * prev_total) + (time_sum or 0)
+        avg_time = new_time / total_items_answered if total_items_answered else 0
+
+        doc_ref.set({
+            "total_items_answered": total_items_answered,
+            "total_correct": total_correct,
+            "total_attempts": total_attempts,
+            "average_time_per_item": avg_time
+        }, merge=True)
+
+    # =========================
+    # UPDATE SUBJECT ANALYTICS
+    # =========================
     for subject, stats in subject_tracker.items():
-        obj, _ = SubjectAnalytics.objects.get_or_create(
-            user=request.user,
-            subject=subject,
-            board_exam=data['board_exam']
-        )
+        doc_ref = db.collection("subject_analytics") \
+            .document(f"{request.user.id}_{subject}_{data['board_exam']}")
 
-        # Weighted average time calculation
-        total_prev_time = obj.average_time_per_item * obj.total_items_answered
-        total_new_time = total_prev_time + stats["time"]
-        obj.total_items_answered += stats["total"]
-        obj.total_correct += stats["correct"]
-        obj.total_attempts += 1
-        obj.average_time_per_item = total_new_time / obj.total_items_answered
+        update_counter(doc_ref, stats["correct"], stats["total"], stats["time"])
 
-        obj.save()
-
-    # ---- Update TOPIC ANALYTICS with weighted average ----
+    # =========================
+    # UPDATE TOPIC ANALYTICS
+    # =========================
     for topic, stats in topic_tracker.items():
-        obj, _ = TopicAnalytics.objects.get_or_create(
-            user=request.user,
-            subject=stats["subject"],  # use correct subject
-            topic=topic
-        )
+        doc_ref = db.collection("topic_analytics") \
+            .document(f"{request.user.id}_{topic}")
 
-        total_prev_time = obj.average_time_per_item * obj.total_items_answered
-        total_new_time = total_prev_time + stats["time"]
-        obj.total_items_answered += stats["total"]
-        obj.total_correct += stats["correct"]
-        obj.average_time_per_item = total_new_time / obj.total_items_answered
+        update_counter(doc_ref, stats["correct"], stats["total"], stats["time"])
 
-        obj.save()
-
-    # ---- Update DIFFICULTY ANALYTICS ----
+    # =========================
+    # UPDATE DIFFICULTY ANALYTICS
+    # =========================
     for difficulty, stats in difficulty_tracker.items():
-        obj, _ = DifficultyAnalytics.objects.get_or_create(
-            user=request.user,
-            board_exam=data['board_exam'],
-            difficulty=difficulty
-        )
-        obj.total_items_answered += stats["total"]
-        obj.total_correct += stats["correct"]
-        obj.save()
+        doc_ref = db.collection("difficulty_analytics") \
+            .document(f"{request.user.id}_{difficulty}_{data['board_exam']}")
 
-    # ---- Save raw practice result ----
-    PracticeResult.objects.create(
-        session_id=session_id,
-        user=request.user,
-        board_exam=data['board_exam'],
-        total_items=total_items,
-        score=score,
-        percent=pct,
-        total_time=total_time_elapsed,
-        answers=results
-    )
+        doc_ref.set({
+            "total_items_answered": firestore.Increment(stats["total"]),
+            "total_correct": firestore.Increment(stats["correct"])
+        }, merge=True)
 
-    # Keep results in session
+    # =========================
+    # SAVE PRACTICE RESULT
+    # =========================
+    db.collection("practice_results").add({
+        "session_id": session_id,
+        "user_id": request.user.id,
+        "board_exam": data["board_exam"],
+        "total_items": total_items,
+        "score": score,
+        "percent": pct,
+        "total_time": total_time_elapsed,
+        "answers": results,
+        "created_at": firestore.SERVER_TIMESTAMP
+    })
+
+    # =========================
+    # STORE SESSION RESULT
+    # =========================
     request.session[f'practice_result_{session_id}'] = {
-        'score': score,
-        'total_items': total_items,
-        'percent': pct,
-        'results': results,
-        'total_time': total_time_elapsed,
-        'board_exam': data['board_exam'],
-        'created_at': timezone.now().isoformat(),
+        "score": score,
+        "total_items": total_items,
+        "percent": pct,
+        "results": results,
+        "total_time": total_time_elapsed,
+        "board_exam": data["board_exam"],
+        "created_at": timezone.now().isoformat(),
     }
+
     request.session.modified = True
 
     return redirect('practice_result_page', session_id=session_id)
 
 
 def practice_result_page(request, session_id):
-    res = request.session.get(f'practice_result_{session_id}')
-    if not res:
+
+    doc = db.collection("practice_results") \
+        .document(session_id) \
+        .get()
+
+    if not doc.exists:
         messages.error(request, "No practice results found for that session.")
         return redirect('practice_start')
-    return render(request, 'practice_result.html', {'res': res})
+
+    res = doc.to_dict()
+
+    return render(request, 'practice_result.html', {
+        'res': res
+    })
 
 from django.core.serializers.json import DjangoJSONEncoder
 
 @login_required
 def analytics_dashboard(request):
-    user = request.user
-    results = PracticeResult.objects.filter(user=user)
 
-    # Temporary containers
+    user_id = request.user.id
+
+    results_ref = db.collection("practice_results") \
+        .where("user_id", "==", user_id) \
+        .stream()
+
     subject_data = {}
     topic_data = {}
     difficulty_data = {}
 
-    for res in results:
-        board_exam = res.board_exam  # e.g., "ECE", "EE"
+    for doc in results_ref:
+        res = doc.to_dict()
 
-        for ans in res.answers:
-            q_id = ans['q_id']
-            selected = ans['selected']
-            correct = ans['correct']
-            time_spent = ans.get('time_spent', 0.0)
+        board_exam = res.get("board_exam")
+        answers = res.get("answers", [])
 
-            # Fetch question object
-            try:
-                q = Question.objects.get(id=q_id)
-            except Question.DoesNotExist:
+        for ans in answers:
+
+            q_id = ans.get("q_id")
+            selected = ans.get("selected")
+            correct = ans.get("correct")
+            time_spent = ans.get("time_spent", 0.0)
+
+            # =========================
+            # QUESTION FETCH (FIRESTORE)
+            # =========================
+            q_doc = db.collection("questions").document(q_id).get()
+            if not q_doc.exists:
                 continue
 
-            # --- Pick subject that matches this board exam ---
+            q = q_doc.to_dict()
+
+            subjects = q.get("subjects", [])
+            topic = q.get("topic", "Misc")
+            difficulty = q.get("difficulty", "Unknown")
+
             subject = "Unknown"
-            for subj in q.subjects.all():
-                if subj.name in BOARD_EXAM_TOPICS.get(board_exam, {}):
-                    subject = subj.name
+            for subj in subjects:
+                if subj in BOARD_EXAM_TOPICS.get(board_exam, {}):
+                    subject = subj
                     break
 
-            topic = q.topic.name if q.topic else "Misc"
-            difficulty = q.difficulty.level if q.difficulty else "Unknown"
-
-            # --- SUBJECT ---
+            # ================= SUBJECT =================
             key = (subject, board_exam)
-            if key not in subject_data:
-                subject_data[key] = {
-                    'total_items_answered': 0,
-                    'total_correct': 0,
-                    'total_time': 0.0,
-                }
-            subject_data[key]['total_items_answered'] += 1
-            subject_data[key]['total_correct'] += int(selected == correct)
-            subject_data[key]['total_time'] += time_spent
+            subject_data.setdefault(key, {
+                "total_items_answered": 0,
+                "total_correct": 0,
+                "total_time": 0.0,
+            })
 
-            # --- TOPIC ---
+            subject_data[key]["total_items_answered"] += 1
+            subject_data[key]["total_correct"] += int(selected == correct)
+            subject_data[key]["total_time"] += time_spent
+
+            # ================= TOPIC =================
             key_topic = (topic, subject)
-            if key_topic not in topic_data:
-                topic_data[key_topic] = {
-                    'total_items_answered': 0,
-                    'total_correct': 0,
-                    'total_time': 0.0,
-                }
-            topic_data[key_topic]['total_items_answered'] += 1
-            topic_data[key_topic]['total_correct'] += int(selected == correct)
-            topic_data[key_topic]['total_time'] += time_spent
+            topic_data.setdefault(key_topic, {
+                "total_items_answered": 0,
+                "total_correct": 0,
+                "total_time": 0.0,
+            })
 
-            # --- DIFFICULTY ---
+            topic_data[key_topic]["total_items_answered"] += 1
+            topic_data[key_topic]["total_correct"] += int(selected == correct)
+            topic_data[key_topic]["total_time"] += time_spent
+
+            # ================= DIFFICULTY =================
             key_diff = (difficulty, board_exam)
-            if key_diff not in difficulty_data:
-                difficulty_data[key_diff] = {
-                    'total_items_answered': 0,
-                    'total_correct': 0,
-                }
-            difficulty_data[key_diff]['total_items_answered'] += 1
-            difficulty_data[key_diff]['total_correct'] += int(selected == correct)
+            difficulty_data.setdefault(key_diff, {
+                "total_items_answered": 0,
+                "total_correct": 0,
+            })
 
-    # Convert dicts to list with calculated accuracy
+            difficulty_data[key_diff]["total_items_answered"] += 1
+            difficulty_data[key_diff]["total_correct"] += int(selected == correct)
+
+    # =========================
+    # BUILD SUBJECT LIST
+    # =========================
     subject_list = []
     for (subj, be), v in subject_data.items():
-        avg_time = v['total_time'] / v['total_items_answered'] if v['total_items_answered'] else 0
-        acc = (v['total_correct'] / v['total_items_answered'] * 100) if v['total_items_answered'] else 0
+
+        avg_time = v["total_time"] / v["total_items_answered"] if v["total_items_answered"] else 0
+        acc = (v["total_correct"] / v["total_items_answered"] * 100) if v["total_items_answered"] else 0
+
         subject_list.append({
             "subject": subj,
             "board_exam": be,
-            "total_items_answered": v['total_items_answered'],
-            "total_correct": v['total_correct'],
+            "total_items_answered": v["total_items_answered"],
+            "total_correct": v["total_correct"],
             "average_time_per_item": round(avg_time, 2),
             "accuracy": round(acc, 2),
         })
 
+    # =========================
+    # BUILD TOPIC LIST
+    # =========================
     topic_list = []
     for (topic, subj), v in topic_data.items():
-        avg_time = v['total_time'] / v['total_items_answered'] if v['total_items_answered'] else 0
-        acc = (v['total_correct'] / v['total_items_answered'] * 100) if v['total_items_answered'] else 0
+
+        avg_time = v["total_time"] / v["total_items_answered"] if v["total_items_answered"] else 0
+        acc = (v["total_correct"] / v["total_items_answered"] * 100) if v["total_items_answered"] else 0
+
         topic_list.append({
             "subject": subj,
             "topic": topic,
-            "total_items_answered": v['total_items_answered'],
-            "total_correct": v['total_correct'],
+            "total_items_answered": v["total_items_answered"],
+            "total_correct": v["total_correct"],
             "average_time_per_item": round(avg_time, 2),
             "accuracy": round(acc, 2),
         })
 
+    # =========================
+    # BUILD DIFFICULTY LIST
+    # =========================
     difficulty_list = []
     for (diff, be), v in difficulty_data.items():
-        acc = (v['total_correct'] / v['total_items_answered'] * 100) if v['total_items_answered'] else 0
+
+        acc = (v["total_correct"] / v["total_items_answered"] * 100) if v["total_items_answered"] else 0
+
         difficulty_list.append({
             "difficulty": diff,
             "board_exam": be,
-            "total_items_answered": v['total_items_answered'],
-            "total_correct": v['total_correct'],
+            "total_items_answered": v["total_items_answered"],
+            "total_correct": v["total_correct"],
             "accuracy": round(acc, 2),
         })
 
     return render(request, "analytics_dashboard.html", {
-        "subject_analytics": json.dumps(subject_list, cls=DjangoJSONEncoder),
-        "topic_analytics": json.dumps(topic_list, cls=DjangoJSONEncoder),
-        "difficulty_analytics": json.dumps(difficulty_list, cls=DjangoJSONEncoder),
-        "ai_suggestions": "",  # Optional: call AI here if you want
+        "subject_analytics": json.dumps(subject_list),
+        "topic_analytics": json.dumps(topic_list),
+        "difficulty_analytics": json.dumps(difficulty_list),
+        "ai_suggestions": "",
     })
