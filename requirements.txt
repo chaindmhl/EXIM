@@ -1,6 +1,6 @@
 Django==3.2
 djangorestframework==3.12.4
-psycopg2-binary
+#psycopg2-binary
 weasyprint
 numpy
 opencv-python
@@ -17,3 +17,4 @@ python-dotenv==1.0.0
 django-storages==1.14.3 
 google-cloud-storage
 djangorestframework-simplejwt
+firebase-admin
