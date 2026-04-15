@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from google.oauth2 import service_account
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -43,8 +44,42 @@ INSTALLED_APPS = [
     'rest_framework',
     'board_exam',
     "whitenoise.runserver_nostatic",
+    "storages"
 ]
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+}
+
+from google.cloud import storage
+
+# This will use:
+# - Service account credentials in Cloud Run
+# - GOOGLE_APPLICATION_CREDENTIALS locally (optional)
+try:
+    # For Cloud Run or environment with default credentials
+    client = storage.Client()
+except Exception:
+    # Optional: fallback for local development if you want to use JSON file
+    import os
+    from google.oauth2 import service_account
+    GS_CREDENTIALS = service_account.Credentials.from_service_account_file(
+        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    )
+    client = storage.Client(credentials=GS_CREDENTIALS)
+
+# DEFAULT_FILE_STORAGE = "storages.backends.gcloud.GoogleCloudStorage"
+# GS_BUCKET_NAME = "project-5e6fa15a-0ef4-476a-b87_cloudbuild"
+# GS_DEFAULT_ACL = None   # Required if using Uniform Bucket Level Access
+# GS_FILE_OVERWRITE = False
+
+
+# MEDIA_URL = f"https://storage.googleapis.com/{GS_BUCKET_NAME}/"
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -77,17 +112,22 @@ TEMPLATES = [
 WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': os.environ.get('DB_NAME'),
+#         'USER': os.environ.get('DB_USER'),
+#         'PASSWORD': os.environ.get('DB_PASSWORD'),
+#         'HOST': os.environ.get('DB_HOST'),
+#         'PORT': '5432',
+#     }
+# }
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('DB_NAME'),
-        'USER': os.environ.get('DB_USER'),
-        'PASSWORD': os.environ.get('DB_PASSWORD'),
-        'HOST': os.environ.get('DB_HOST'),
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': '/tmp/db.sqlite3',
     }
 }
-
 
 
 
@@ -132,3 +172,8 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 
 
+SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = True

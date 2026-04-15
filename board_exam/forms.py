@@ -8,7 +8,7 @@ from django.contrib.auth.forms import AuthenticationForm
 class EmailAuthenticationForm(AuthenticationForm):
     username = forms.EmailField(label='Email', max_length=254)
 
-class SignUpForm(forms.ModelForm):
+class SignUpForm(forms.Form):
     ROLE_CHOICES = (
         ('teacher', 'Teacher'),
         ('student', 'Student'),
@@ -44,10 +44,7 @@ class SignUpForm(forms.ModelForm):
         ]
 
     def clean_email(self):
-        email = self.cleaned_data.get('email')
-        if CustomUser.objects.filter(email=email).exists():
-            raise forms.ValidationError("Email already exists.")
-        return email
+        return self.cleaned_data.get('email')
 
     def clean(self):
         cleaned = super().clean()

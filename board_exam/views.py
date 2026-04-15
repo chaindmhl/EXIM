@@ -44,46 +44,62 @@ import datetime
 import openai
 from datetime import datetime
 from scripts.model_loader import get_original_model, get_cropped_model
-from services.user_service import UserService
+from .services.user_service import UserService
+from .services.question_service import QuestionService
+from .services.test_service import TestService
+from google.cloud import storage
+from firebase_admin import firestore, auth
+from functools import wraps
+from .firebase import initialize_firebase
+
+
+initialize_firebase()
 
 def firebase_login_required(view_func):
+    @wraps(view_func)
     def wrapper(request, *args, **kwargs):
-        if not request.session.get("uid"):
+        uid = request.session.get("uid")
+
+        if not uid:
             return redirect("login")
+
+        user = UserService.get_user(uid)
+
+        # ✅ prevent crash early
+        if not user:
+            return redirect("login")
+
+        request.user_data = user  # optional (cleaner access)
+
         return view_func(request, *args, **kwargs)
     return wrapper
 
 logo_path = os.path.join(settings.BASE_DIR, 'static', 'EXIM2.png')  # full path
 
-from firebase_admin import firestore, auth
-
-db = firestore.client()
 
 # =========================
 # FIRESTORE TEST
 # =========================
 def test_firestore(request):
-    doc_ref = db.collection("test").add({
-        "message": "Cloud Run can access Firestore",
-        "status": "success",
-        "timestamp": firestore.SERVER_TIMESTAMP
-    })
-
+    doc_id = UserService.test_firestore()
     return JsonResponse({
         "ok": True,
-        "doc_id": doc_ref[1].id
+        "doc_id": doc_id
     })
 
+import logging
 
-# =========================
-# SIGNUP (FIREBASE AUTH)
-# =========================
+logger = logging.getLogger(__name__)
+
 @csrf_protect
 def signup(request):
     if request.method == 'POST':
         form = SignUpForm(request.POST)
 
+        logger.info("SIGNUP POST HIT")
+
         if not form.is_valid():
+            logger.warning(f"Form invalid: {form.errors}")
             return render(request, 'signup.html', {'form': form})
 
         try:
@@ -91,7 +107,8 @@ def signup(request):
             email = form.cleaned_data['email']
             password = form.cleaned_data['password']
 
-            # 1. Create Firebase Auth user
+            logger.info(f"Creating Firebase user: {email}")
+
             user_record = auth.create_user(
                 email=email,
                 password=password
@@ -99,70 +116,77 @@ def signup(request):
 
             uid = user_record.uid
 
-            uid = user_record.uid
+            logger.info(f"Firebase user created: {uid}")
 
             UserService.create_user(
                 user_id=uid,
                 email=email,
+                role=role,
                 is_student=(role == "student"),
                 is_staff=(role == "teacher")
             )
-            
-            if role == "student":
-                UserService.create_student(uid, {
-                    "first_name": form.cleaned_data.get("first_name"),
-                    "last_name": form.cleaned_data.get("last_name"),
-                    "course": form.cleaned_data.get("course"),
-                })
-            
-            elif role == "teacher":
-                UserService.create_teacher(uid, {
-                    "first_name": form.cleaned_data.get("first_name"),
-                    "last_name": form.cleaned_data.get("last_name"),
-                })
+
+            logger.info("Firestore user created")
 
             messages.success(request, "Account created successfully!")
             return redirect('login')
 
         except Exception as e:
-            messages.error(request, f"Error: {str(e)}")
-            return render(request, 'signup.html', {'form': form})
+            logger.error("SIGNUP ERROR", exc_info=True)
+            return HttpResponse(f"ERROR: {str(e)}")
 
     return render(request, 'signup.html', {'form': SignUpForm()})
-
 
 # =========================
 # LOGIN (FIREBASE TOKEN)
 # =========================
+import json
+
 def login_view(request):
     if request.method == 'POST':
-        id_token = request.POST.get('id_token')
-
         try:
+            logger.info("🔥 LOGIN START")
+
+            data = json.loads(request.body.decode("utf-8"))
+            logger.info(f"🔥 PARSED DATA: {data}")
+
+            id_token = data.get("id_token")
+            if not id_token:
+                return JsonResponse({"error": "No ID token provided"}, status=400)
+
             decoded = auth.verify_id_token(id_token)
-            uid = decoded['uid']
+            uid = decoded["uid"]
 
-            user_doc = db.collection("users").document(uid).get()
+            user_data = UserService.get_user(uid)
 
-            if not user_doc.exists:
+            if not user_data:
                 return JsonResponse({"error": "User not found"}, status=404)
 
-            user_data = user_doc.to_dict()
-            role = user_data.get("role")
+            role = user_data.get("role", "student")
 
-            # store session
             request.session["uid"] = uid
             request.session["role"] = role
+            request.session.modified = True
 
-            if role == "teacher":
-                return redirect("home")
-            else:
-                return redirect("home_student")
+            logger.info("🔥 LOGIN SUCCESS")
+
+            return JsonResponse({
+                "success": True,
+                "redirect": "/home/" if role == "teacher" else "/home_student/"
+            })
 
         except Exception as e:
-            return JsonResponse({"error": str(e)}, status=400)
+            logger.error("🔥 LOGIN ERROR")
+            logger.error(traceback.format_exc())
 
-    return render(request, 'login.html')
+            # 🔥 ALWAYS RETURN JSON (NEVER HTML)
+            return JsonResponse({
+                "success": False,
+                "error": str(e),
+                "type": type(e).__name__
+            }, status=500)
+
+    return render(request, "login.html")
 
 
 # =========================
@@ -182,11 +206,7 @@ def get_user_role(request):
         return None
 
     user_data = UserService.get_user(uid)
-
-    if user_doc.exists:
-        return user_doc.to_dict().get("role")
-
-    return None
+    return user_data.get("role") if user_data else None
 
 
 # =========================
@@ -208,30 +228,61 @@ def main_dashboard(request):
 # =========================
 # TEACHER DASHBOARD
 # =========================
-@firebase_login_required
 def home(request):
-    user = UserService.get_user(request.session["uid"]) 
-    role = user.get("role")
+    try:
+        logger.warning("🔥 ENTER HOME VIEW")
 
-    if role != "teacher":
-        return HttpResponseForbidden("You cannot access this page")
+        uid = request.session.get("uid")
+        logger.warning(f"🔥 SESSION UID: {uid}")
 
-    return render(request, 'home.html')
+        if not uid:
+            logger.warning("❌ NO UID IN SESSION")
+            return redirect("login")
+
+        user = UserService.get_user(uid)
+        logger.warning(f"🔥 FIRESTORE USER: {user}")
+
+        if not user:
+            logger.warning("❌ USER NOT FOUND IN FIRESTORE")
+            return redirect("login")
+
+        role = user.get("role")
+        logger.warning(f"🔥 ROLE: {role}")
+
+        if role != "teacher":
+            return HttpResponseForbidden("You cannot access this page")
+
+        return render(request, "home.html")
+
+    except Exception as e:
+        logger.error("🔥 HOME CRASH ERROR", exc_info=True)
+        return JsonResponse({
+            "error": str(e),
+            "type": type(e).__name__
+        }, status=500)
 
 
 # =========================
 # STUDENT DASHBOARD
 # =========================
-@firebase_login_required
 def home_student(request):
-    user = UserService.get_user(request.session["uid"]) 
+    uid = request.session.get("uid")
+
+    if not uid:
+        return redirect("login")
+
+    user = UserService.get_user(uid)
+
+    # ✅ PREVENT CRASH
+    if not user:
+        return redirect("login")
+
     role = user.get("role")
 
     if role != "student":
         return HttpResponseForbidden("You cannot access this page")
 
     return render(request, 'home_student.html')
-
 
 # =========================
 # ROOT REDIRECT
@@ -250,38 +301,29 @@ def root_redirect(request):
     else:
         return redirect("login")
 
-from firebase_admin import firestore
-from google.cloud import storage
-import random, uuid
 
-db = firestore.client()
 
-storage_client = storage.Client()
-BUCKET_NAME = "exim-media-concrete-potion-477505-p2"
-bucket = storage_client.bucket(BUCKET_NAME)
+# storage_client = storage.Client()
+# BUCKET_NAME = "exim-bucket"
+# bucket = storage_client.bucket(BUCKET_NAME)
 
-def serve_image(request, image_name):
-    blob = bucket.blob(image_name)
+# def serve_image(request, image_name):
+#     blob = bucket.blob(image_name)
 
-    if not blob.exists():
-        return HttpResponse("Image not found", status=404)
+#     if not blob.exists():
+#         return HttpResponse("Image not found", status=404)
 
-    image_bytes = blob.download_as_bytes()
-    content_type = blob.content_type or "application/octet-stream"
+#     image_bytes = blob.download_as_bytes()
+#     content_type = blob.content_type or "application/octet-stream"
 
-    return HttpResponse(image_bytes, content_type=content_type)
+#     return HttpResponse(image_bytes, content_type=content_type)
 
 def question_bank(request):
-    questions_ref = db.collection("questions").stream()
+    questions = QuestionService.get_all()
 
-    questions = []
+    letters = ["A", "B", "C", "D", "E"]
 
-    for doc in questions_ref:
-        q = doc.to_dict()
-        q["id"] = doc.id
-
-        # format choices
-        letters = ["A", "B", "C", "D", "E"]
+    for q in questions:
         choices = q.get("choices", [])
 
         q["lettered_choices"] = [
@@ -296,20 +338,16 @@ def question_bank(request):
 
         q["image_names"] = q.get("images", [])
 
-        questions.append(q)
-
     return render(request, "question_bank.html", {"questions": questions})
 
-from django.views import View
-from django.shortcuts import redirect
-
 class Add_Question(View):
+
     def get(self, request):
-        context = {
+        return render(request, "add_question.html", {
             'BOARD_EXAMS': list(BOARD_EXAM_TOPICS.keys()),
             'LEVELS_JSON': json.dumps(LEVELS),
-        }
-        return render(request, "add_question.html", context)
+            'BOARD_EXAM_TOPICS_JSON': json.dumps(BOARD_EXAM_TOPICS),
+        })
 
     def post(self, request):
 
@@ -324,24 +362,35 @@ class Add_Question(View):
 
         for i in range(1, num_questions + 1):
 
-            board_exam_names = request.POST.getlist(f"board_exam_{i}")
+            question_text = request.POST.get(f"question_text_{i}")
+            if not question_text:
+                continue
+
+            board_exam_names = request.POST.getlist("board_exam_checkbox")
             subject_names = request.POST.getlist(f"subjects_{i}[]")
             topic_name = request.POST.get(f"topic_{i}")
             level_name = request.POST.get(f"level_{i}")
-            question_text = request.POST.get(f"question_text_{i}")
             source = request.POST.get(f"source_{i}", "google.com")
 
-            # upload image
+            # -------------------------
+            # IMAGE UPLOAD (FIXED FOR FIREBASE)
+            # -------------------------
             image_file = request.FILES.get(f"image_{i}")
             image_url = None
 
             if image_file:
                 blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
+
                 blob.upload_from_file(image_file)
+
+                # IMPORTANT: Firebase Storage supports public access
                 blob.make_public()
+
                 image_url = blob.public_url
 
-            # build choices
+            # -------------------------
+            # CHOICES
+            # -------------------------
             choices = []
             correct_letter = request.POST.get(f"correct_answer_{i}")
 
@@ -353,35 +402,47 @@ class Add_Question(View):
                         "is_correct": letter == correct_letter
                     })
 
-            # FIRESTORE QUESTION
-            db.collection("questions").add({
-                "board_exams": board_exam_names,
-                "subjects": subject_names,
-                "topic": topic_name,
-                "difficulty": level_name,
-                "question_text": question_text,
-                "source": source,
-                "images": [image_url] if image_url else [],
-                "choices": choices,
-                "usage_count": 0,
-                "created_at": firestore.SERVER_TIMESTAMP
-            })
+            # VALIDATION
+            if len(choices) < 2:
+                messages.error(request, f"Question {i} must have at least 2 choices")
+                return redirect("add_question")
+
+            if not topic_name:
+                messages.error(request, f"Question {i} must have a topic")
+                return redirect("add_question")
+
+            # -------------------------
+            # SAVE
+            # -------------------------
+            QuestionService.create_question(
+                question_text=question_text,
+                choices=choices,
+                image_url=image_url,
+                level=level_name,
+                source=source,
+                subject_names=subject_names,
+                topic_name=topic_name,
+                board_exam_list=board_exam_names
+            )
 
         messages.success(request, f"{num_questions} questions added successfully!")
         return redirect("question_bank")
+        
+@staticmethod
+def get_random_by_subject(subject, num_questions):
+    docs = db.collection("questions")\
+        .where("subjects", "array_contains", subject)\
+        .stream()
 
-def get_random_questions(num_questions, subject):
-
-    all_q = db.collection("questions").where(
-        "subjects", "array_contains", subject
-    ).stream()
-
-    questions = [q.to_dict() | {"id": q.id} for q in all_q]
+    questions = [{**d.to_dict(), "id": d.id} for d in docs]
 
     if num_questions > len(questions):
         raise ValueError("Not enough questions")
 
     return random.sample(questions, num_questions)
+
+def get_random_questions(num_questions, subject):
+    return QuestionService.get_random_by_subject(subject, num_questions)
 
 def generate_set_id(board_exam):
     prefix_map = {
@@ -438,12 +499,6 @@ def generate_test(request):
 
     return render(request, "generate_test.html")
     
-import string
-import random
-import uuid
-from firebase_admin import firestore
-
-db = firestore.client()
 
 def map_letter_text(choices_lists, correct_text_dict):
 
@@ -515,6 +570,14 @@ def build_answer_key(question_docs):
                 break
 
     return answer_key
+
+def download_test_interface(request):
+    test_keys = TestService.get_all_tests()
+    test_keys = sorted(test_keys, key=lambda x: x.get("created_at", 0), reverse=True)
+
+    return render(request, 'download_test.html', {
+        'test_keys': test_keys
+    })
 
 
 def download_test_pdf(request):
@@ -658,24 +721,12 @@ def download_existing_test_pdf(request):
 
 ####################### FOR UPLOADING MOODLE XML FILE (QUESTIONS) TO THE QUESTION BANK  ##############################
 
-from firebase_admin import firestore
-from google.cloud import storage
-import os, base64, re, uuid
-from django.core.files.base import ContentFile
-from django.core.files.uploadedfile import InMemoryUploadedFile
-
-db = firestore.client()
-
-storage_client = storage.Client()
-BUCKET_NAME = "exim-media-concrete-potion-477505-p2"
-bucket = storage_client.bucket(BUCKET_NAME)
-
 
 def strip_tags(html):
     return re.sub('<[^<]+?>', '', html)
 
 
-def save_question_firestore(
+def save_question(
     question_text,
     choices,
     image_file,
@@ -761,7 +812,7 @@ def extract_and_save_questions(xml_file, subject):
         if image_file:
             image_path = save_image_locally(image_file)
 
-        save_question_firestore(
+        save_question(
             question_text=question_text,
             choices=choices,
             image_file=image_file,
@@ -888,7 +939,7 @@ def parse_txt(text, image_files, subject_name, topic_name):
 
                 i += 1
 
-            save_question_firestore(
+            save_question(
                 question_text,
                 choices,
                 None,
@@ -901,49 +952,6 @@ def parse_txt(text, image_files, subject_name, topic_name):
 
         i += 1
 
-
-# -----------------------------------------
-# PARSE XLSX
-# -----------------------------------------
-
-def save_question_firestore(
-    question_text,
-    choices,
-    image_file,
-    level,
-    source,
-    subject_name,
-    topic_name,
-    board_exam_list=None
-):
-
-    # Upload image to Cloud Storage
-    image_url = None
-    if image_file:
-        blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
-        blob.upload_from_file(image_file)
-        blob.make_public()
-        image_url = blob.public_url
-
-    formatted_choices = []
-    for letter, (text, is_correct) in (choices or {}).items():
-        if text:
-            formatted_choices.append({
-                "text": text.strip(),
-                "is_correct": bool(is_correct)
-            })
-
-    db.collection("questions").add({
-        "question_text": question_text,
-        "choices": formatted_choices,
-        "image": image_url,
-        "difficulty": level,
-        "source": source,
-        "subject": subject_name,
-        "topic": topic_name,
-        "board_exams": board_exam_list or [],
-        "created_at": firestore.SERVER_TIMESTAMP
-    })
 
 def parse_xlsx(df, image_map=None, subject=None, topic=None):
 
@@ -1003,7 +1011,7 @@ def parse_xlsx(df, image_map=None, subject=None, topic=None):
             parts = [p.strip().upper() for p in raw.split(",") if p.strip()]
             board_exam_list = parts
 
-        save_question_firestore(
+        save_question(
             question_text=question_text,
             choices=choices,
             image_file=image,
@@ -1070,9 +1078,7 @@ def upload_file(request):
 
 
 ####################### FOR UPLOADING AND CHECKING OF ANSWER SHEET (IMAGE) ##############################
-from firebase_admin import firestore
 
-db = firestore.client()
 
 def get_exam_id_suggestions(request):
     input_text = request.GET.get('input', '').lower()
@@ -1275,14 +1281,6 @@ def get_testkeys_by_topic(request):
         testkeys = [doc.id for doc in keys]
 
     return JsonResponse({"testkeys": testkeys})
-
-from firebase_admin import firestore
-from datetime import datetime
-from django.http import JsonResponse, HttpResponse
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-
-db = firestore.client()
 
 
 def download_exam_results(request):
@@ -1642,12 +1640,6 @@ def online_answer_test(request):
 
 
 
-from firebase_admin import firestore
-from django.shortcuts import render
-
-db = firestore.client()
-
-
 def answer_test_preview(request, subject, board_exam, set_a_id, set_b_id):
 
     # -----------------------
@@ -1676,9 +1668,6 @@ def answer_test_preview(request, subject, board_exam, set_a_id, set_b_id):
 
 import random
 import json
-from firebase_admin import firestore
-
-db = firestore.client()
 
 
 def answer_online_exam(request):
@@ -1751,17 +1740,6 @@ def answer_online_exam(request):
             "exam_data_json": json.dumps(data),
         }
     )
-
-from django.utils.dateparse import parse_datetime
-
-from firebase_admin import firestore
-from django.shortcuts import render, redirect
-from django.contrib import messages
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
-import random, string, uuid
-
-db = firestore.client()
 
 
 def exam_form(request, set_id):

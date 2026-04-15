@@ -6,9 +6,10 @@ class UserService:
 
     # ---------- USERS ----------
     @staticmethod
-    def create_user(user_id, email, is_student=False, is_staff=False):
+    def create_user(user_id, email, role, is_student=False, is_staff=False):
         db.collection("users").document(user_id).set({
             "email": email,
+            "role": role,  # ✅ ADD THIS
             "is_student": is_student,
             "is_staff": is_staff,
         })

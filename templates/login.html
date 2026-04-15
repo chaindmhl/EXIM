@@ -176,7 +176,7 @@
     <div class="login-container">
       <img src="{% static 'EXIM2.png' %}" alt="EXIM Logo">
 
-      <form method="post" autocomplete="off">
+      <form onsubmit="event.preventDefault(); loginUser();">
         {% csrf_token %}
         <label for="id_username">Email</label>
         <input type="email" id="id_username" name="username" required>
@@ -184,7 +184,7 @@
         <label for="id_password">Password</label>
         <input type="password" id="id_password" name="password" required>
 
-        <button type="submit">Login</button>
+        <button type="submit" id="loginBtn">Login</button>
       </form>
 
       <button class="signup-button" onclick="redirectToSignup()">Create Free Account</button>
@@ -219,27 +219,72 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script type="module">
-    // Import the functions you need from the SDKs you need
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
-    import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-analytics.js";
-    // TODO: Add SDKs for Firebase products that you want to use
-    // https://firebase.google.com/docs/web/setup#available-libraries
-  
-    // Your web app's Firebase configuration
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-    const firebaseConfig = {
-      apiKey: "AIzaSyBHMm_go23g6OYbnZxH_L23-C3tgVs04-c",
-      authDomain: "boardmate-c162e.firebaseapp.com",
-      projectId: "boardmate-c162e",
-      storageBucket: "boardmate-c162e.firebasestorage.app",
-      messagingSenderId: "94218560547",
-      appId: "1:94218560547:web:ce6e53eaf32ba6769cfd96",
-      measurementId: "G-50PRDEWGZX"
-    };
-  
-    // Initialize Firebase
-    const app = initializeApp(firebaseConfig);
-    const analytics = getAnalytics(app);
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDHLsymLKjssNzU7XHLAl0By_g6iAuXBY8",
+    authDomain: "project-5e6fa15a-0ef4-476a-b87.firebaseapp.com",
+    projectId: "project-5e6fa15a-0ef4-476a-b87",
+    storageBucket: "project-5e6fa15a-0ef4-476a-b87.firebasestorage.app",
+    messagingSenderId: "268390455018",
+    appId: "1:268390455018:web:8d11edbcbc87a872022993"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+
+  window.loginUser = async function () {
+    const email = document.getElementById("id_username").value;
+    const password = document.getElementById("id_password").value;
+    const btn = document.getElementById("loginBtn");
+
+    btn.disabled = true;
+    btn.innerText = "Logging in...";
+
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const token = await userCredential.user.getIdToken();
+
+      const csrftoken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+      const response = await fetch("/login/", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrftoken
+        },
+        body: JSON.stringify({
+          id_token: token
+        })
+      });
+
+      let data;
+      const text = await response.text();
+
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error("❌ NON-JSON RESPONSE:", text);
+        alert("Server error (check backend logs)");
+        return;
+      }
+
+      if (data.success) {
+        window.location.href = data.redirect;
+      } else {
+        alert(data.error || "Login failed");
+      }
+
+    } catch (error) {
+      console.error(error);
+      alert("Login failed: " + error.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerText = "Login";
+    }
+  };
   </script>
 </body>
 </html>

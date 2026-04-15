@@ -50,12 +50,12 @@ COPY . .
 # -------------------------
 # Download models
 # -------------------------
-RUN mkdir -p /app/models && \
-    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model1.zip -O /tmp/model1.zip && \
-    unzip /tmp/model1.zip -d /app/models && \
-    wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model2.zip -O /tmp/model2.zip && \
-    unzip /tmp/model2.zip -d /app/models && \
-    rm -rf /tmp/model1.zip /tmp/model2.zip
+# RUN mkdir -p /app/models && \
+#     wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model1.zip -O /tmp/model1.zip && \
+#     unzip /tmp/model1.zip -d /app/models && \
+#     wget https://github.com/chaindmhl/EXIM/releases/download/v1.0/model2.zip -O /tmp/model2.zip && \
+#     unzip /tmp/model2.zip -d /app/models && \
+#     rm -rf /tmp/model1.zip /tmp/model2.zip
 
 
 

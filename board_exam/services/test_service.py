@@ -1,5 +1,3 @@
-# services/test_service.py
-
 from .firestore_client import db
 
 class TestService:
@@ -13,6 +11,14 @@ class TestService:
     def get_test(set_id):
         doc = db.collection("test_keys").document(set_id).get()
         return doc.to_dict() if doc.exists else None
+
+    @staticmethod
+    def get_all_tests():
+        docs = db.collection("test_keys").stream()
+        return [
+            {**doc.to_dict(), "id": doc.id}
+            for doc in docs
+        ]
 
     # ---------- ANSWER KEY ----------
     @staticmethod
