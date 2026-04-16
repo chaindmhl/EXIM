@@ -48,7 +48,8 @@ from .services.user_service import UserService
 from .services.question_service import QuestionService
 from .services.test_service import TestService
 from google.cloud import storage
-from firebase_admin import firestore, auth
+from firebase_admin import firestore, auth, storage
+import firebase_admin
 from functools import wraps
 from .firebase import initialize_firebase
 
@@ -303,22 +304,43 @@ def root_redirect(request):
 
 
 
-# storage_client = storage.Client()
-# BUCKET_NAME = "exim-bucket"
-# bucket = storage_client.bucket(BUCKET_NAME)
+bucket = storage.bucket()
 
-# def serve_image(request, image_name):
-#     blob = bucket.blob(image_name)
+def serve_image(request, image_name):
+    try:
+        blob = bucket.blob(image_name)
 
-#     if not blob.exists():
-#         return HttpResponse("Image not found", status=404)
+        if not blob.exists():
+            raise Http404("Image not found")
 
-#     image_bytes = blob.download_as_bytes()
-#     content_type = blob.content_type or "application/octet-stream"
+        return HttpResponse(
+            blob.download_as_bytes(),
+            content_type=blob.content_type or "image/jpeg"
+        )
 
-#     return HttpResponse(image_bytes, content_type=content_type)
+    except Exception:
+        raise Http404("Image not found")
+
+@staticmethod
+def delete_question(question_id):
+    db.collection("questions").document(question_id).delete()
+
+from urllib.parse import quote
+
+def firebase_image_url(path):
+    if not path:
+        return None
+
+    bucket = "project-5e6fa15a-0ef4-476a-b87.firebasestorage.app"
+
+    return (
+        "https://firebasestorage.googleapis.com/v0/b/"
+        f"{bucket}/o/{quote(path, safe='')}"
+        "?alt=media"
+    )
 
 def question_bank(request):
+
     questions = QuestionService.get_all()
 
     letters = ["A", "B", "C", "D", "E"]
@@ -331,12 +353,23 @@ def question_bank(request):
             for i, c in enumerate(choices[:5])
         ]
 
-        q["correct_answer_text"] = next(
-            (c["text"] for c in choices if c.get("is_correct")),
-            "-"
-        )
+        correct_letter = q.get("correct_letter")
 
-        q["image_names"] = q.get("images", [])
+        # ✅ GET CORRECT ANSWER TEXT FROM LETTER
+        correct_text = "-"
+        if correct_letter:
+            index = ord(correct_letter) - ord("A")  # A->0, B->1, etc.
+            if 0 <= index < len(choices):
+                correct_text = choices[index].get("text", "-")
+
+        q["correct_answer_text"] = correct_text
+
+        # formatting
+        q["board_exam_names"] = ", ".join(q.get("board_exams", []))
+        q["subject_names"] = ", ".join(q.get("subjects", []))
+        q["topic_name"] = q.get("topic", "-")
+        q["level_name"] = q.get("difficulty", "-")
+        q["image_url"] = firebase_image_url(q.get("image"))
 
     return render(request, "question_bank.html", {"questions": questions})
 
@@ -373,20 +406,21 @@ class Add_Question(View):
             source = request.POST.get(f"source_{i}", "google.com")
 
             # -------------------------
-            # IMAGE UPLOAD (FIXED FOR FIREBASE)
+            # FIREBASE IMAGE UPLOAD (UBLA SAFE)
             # -------------------------
             image_file = request.FILES.get(f"image_{i}")
-            image_url = None
+            image_path = None
 
             if image_file:
-                blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
-
+                # blob = bucket.blob(f"questions/{uuid.uuid4().hex}.jpg")
+                blob = bucket.blob(
+                        f"questions/{topic_name}/{uuid.uuid4().hex}_{image_file.name}"
+                    )
                 blob.upload_from_file(image_file)
 
-                # IMPORTANT: Firebase Storage supports public access
-                blob.make_public()
-
-                image_url = blob.public_url
+               
+                # ✅ STORE ONLY PATH
+                image_path = blob.name
 
             # -------------------------
             # CHOICES
@@ -402,7 +436,9 @@ class Add_Question(View):
                         "is_correct": letter == correct_letter
                     })
 
+            # -------------------------
             # VALIDATION
+            # -------------------------
             if len(choices) < 2:
                 messages.error(request, f"Question {i} must have at least 2 choices")
                 return redirect("add_question")
@@ -412,12 +448,12 @@ class Add_Question(View):
                 return redirect("add_question")
 
             # -------------------------
-            # SAVE
+            # SAVE TO FIRESTORE / DB
             # -------------------------
             QuestionService.create_question(
                 question_text=question_text,
                 choices=choices,
-                image_url=image_url,
+                image_url=image_path,   # IMPORTANT: this is now a PATH, not URL
                 level=level_name,
                 source=source,
                 subject_names=subject_names,
@@ -427,7 +463,7 @@ class Add_Question(View):
 
         messages.success(request, f"{num_questions} questions added successfully!")
         return redirect("question_bank")
-        
+
 @staticmethod
 def get_random_by_subject(subject, num_questions):
     docs = db.collection("questions")\
@@ -469,35 +505,62 @@ def generate_test(request):
         subject = request.POST.get("subject", "")
         num_questions = int(request.POST.get("num_questions", 0))
 
-        qs = db.collection("questions")
+        # -------------------------
+        # USE SERVICE LAYER (IMPORTANT FIX)
+        # -------------------------
+        questions = QuestionService.get_all()
 
+        # FILTER IN PYTHON (safe with your current service)
         if board_exam:
-            qs = qs.where("board_exams", "array_contains", board_exam)
+            questions = [
+                q for q in questions
+                if board_exam in (q.get("board_exams") or [])
+            ]
 
         if subject:
-            qs = qs.where("subjects", "array_contains", subject)
+            questions = [
+                q for q in questions
+                if subject in (q.get("subjects") or [])
+            ]
 
-        docs = list(qs.stream())
-
-        questions = [d.to_dict() | {"id": d.id} for d in docs]
+        print("BOARD:", board_exam)
+        print("SUBJECT:", subject)
+        print("RESULT COUNT:", len(questions))
 
         if len(questions) < num_questions:
             return render(request, "generate_test.html", {
+                "BOARD_EXAMS": list(BOARD_EXAM_TOPICS.keys()),
+                "SUBJECTS_JSON": json.dumps(BOARD_EXAM_TOPICS),
                 "error_message": "Not enough questions"
             })
 
         selected = random.sample(questions, num_questions)
+
+        for q in selected:
+            q["image_url"] = firebase_image_url(q.get("image"))
+
+        set_id = uuid.uuid4().hex
+
+        # OPTIONAL: save test metadata
+        TestService.create_test(set_id, {
+            "board_exam": board_exam,
+            "subject": subject,
+            "num_questions": num_questions
+        })
 
         return render(request, "generated_test.html", {
             "set_a_questions": selected,
             "set_b_questions": random.sample(selected, len(selected)),
             "board_exam": board_exam,
             "subject": subject,
-            "set_a_id": uuid.uuid4().hex,
+            "set_a_id": set_id,
             "set_b_id": uuid.uuid4().hex,
         })
 
-    return render(request, "generate_test.html")
+    return render(request, "generate_test.html", {
+        "BOARD_EXAMS": list(BOARD_EXAM_TOPICS.keys()),
+        "SUBJECTS_JSON": json.dumps(BOARD_EXAM_TOPICS)
+    })
     
 
 def map_letter_text(choices_lists, correct_text_dict):
@@ -526,27 +589,27 @@ def map_letter_text(choices_lists, correct_text_dict):
     return answer_key
 
 def get_questions_with_choices(question_docs):
-
     questions = []
     letters = ['A', 'B', 'C', 'D', 'E']
 
-    for doc in question_docs:
-        q = doc.to_dict()
-
+    for q in question_docs:
+        # q is already a dict now
         choices = q.get("choices", [])
 
         formatted_choices = []
         for i, c in enumerate(choices[:5]):
             formatted_choices.append({
                 "letter": letters[i],
-                "text": c.get("text")
+                "text": c.get("text", "")
             })
 
         questions.append({
-            "id": doc.id,
+            "id": q.get("id"),
             "question": q.get("question_text"),
             "choices": formatted_choices,
-            "image_url": q.get("images", [None])[0]
+
+            # FIXED: your field is "image", not "images"
+            "image": q.get("image")
         })
 
     return questions
@@ -556,16 +619,15 @@ def build_answer_key(question_docs):
     letters = ['A', 'B', 'C', 'D', 'E']
     answer_key = {}
 
-    for i, doc in enumerate(question_docs, start=1):
+    for i, q in enumerate(question_docs, start=1):
 
-        q = doc.to_dict()
         choices = q.get("choices", [])
 
         for idx, c in enumerate(choices):
             if c.get("is_correct"):
                 answer_key[str(i)] = {
                     "letter": letters[idx],
-                    "text": c.get("text")
+                    "text": c.get("text", "")
                 }
                 break
 
@@ -581,7 +643,6 @@ def download_test_interface(request):
 
 
 def download_test_pdf(request):
-
     if request.method != "POST":
         return HttpResponse("Invalid request method", status=405)
 
@@ -592,16 +653,29 @@ def download_test_pdf(request):
         set_a_ids = request.POST.getlist("set_a_question_ids[]")
         set_b_ids = request.POST.getlist("set_b_question_ids[]")
 
-        # 🔥 FETCH FROM FIRESTORE
+        # -------------------------
+        # FETCH VIA SERVICE (NO db)
+        # -------------------------
         set_a_docs = [
-            db.collection("questions").document(qid).get()
+            QuestionService.get(qid)
             for qid in set_a_ids
         ]
-
         set_b_docs = [
-            db.collection("questions").document(qid).get()
+            QuestionService.get(qid)
             for qid in set_b_ids
         ]
+
+        set_a_docs = [q for q in set_a_docs if q]
+        set_b_docs = [q for q in set_b_docs if q]
+
+        # -------------------------
+        # NORMALIZE IMAGE URL
+        # -------------------------
+        for q in set_a_docs:
+            q["image"] = firebase_image_url(q.get("image"))
+
+        for q in set_b_docs:
+            q["image"] = firebase_image_url(q.get("image"))
 
         questions_set_a = get_questions_with_choices(set_a_docs)
         questions_set_b = get_questions_with_choices(set_b_docs)
@@ -612,37 +686,38 @@ def download_test_pdf(request):
         set_a_id = f"{board_exam_name}_{uuid.uuid4().hex[:6]}"
         set_b_id = f"{board_exam_name}_{uuid.uuid4().hex[:6]}"
 
-        # 💾 SAVE TO FIRESTORE (instead of SQL)
-        db.collection("test_keys").document(set_a_id).set({
+        # -------------------------
+        # SAVE VIA SERVICE
+        # -------------------------
+        TestService.create_test(set_a_id, {
             "set_id": set_a_id,
             "board_exam": board_exam_name,
             "subject": subject_name,
             "questions": questions_set_a,
-            "choices": {q["id"]: q["choices"] for q in questions_set_a},
             "created_at": firestore.SERVER_TIMESTAMP
         })
 
-        db.collection("test_keys").document(set_b_id).set({
+        TestService.create_test(set_b_id, {
             "set_id": set_b_id,
             "board_exam": board_exam_name,
             "subject": subject_name,
             "questions": questions_set_b,
-            "choices": {q["id"]: q["choices"] for q in questions_set_b},
             "created_at": firestore.SERVER_TIMESTAMP
         })
 
-        # 🔑 SAVE ANSWER KEYS
-        db.collection("answer_keys").document(set_a_id).set({
+        TestService.create_answer_key(set_a_id, {
             "set_id": set_a_id,
             "answer_key": set_a_answer_key
         })
 
-        db.collection("answer_keys").document(set_b_id).set({
+        TestService.create_answer_key(set_b_id, {
             "set_id": set_b_id,
             "answer_key": set_b_answer_key
         })
 
-        # 📄 RENDER PDF
+        # -------------------------
+        # PDF RENDER
+        # -------------------------
         context_a = {
             "board_exam": board_exam_name,
             "subject": subject_name,
@@ -1559,33 +1634,59 @@ def answer_sheet_view(request):
     return render(request, 'answer_sheet.html', {'form': form})
 
 def online_answer_test(request):
-    if request.method != 'POST':
-        return render(request, 'answer_test_form.html')
+    if request.method != "POST":
+        return render(request, "answer_test_form.html")
 
-    subject = request.POST.get('subject')
-    board_exam = request.POST.get('board_exam')
+    subject = request.POST.get("subject")
+    board_exam = request.POST.get("board_exam")
     exam_date_str = timezone.now().strftime("%b%Y")
 
     set_a_id = f"{board_exam}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
     set_b_id = f"{board_exam}_{exam_date_str}_{uuid.uuid4().hex[:4]}"
 
-    set_a_question_ids = request.POST.getlist('set_a_question_ids[]')
-    set_b_question_ids = request.POST.getlist('set_b_question_ids[]')
+    set_a_question_ids = request.POST.getlist("set_a_question_ids[]")
+    set_b_question_ids = request.POST.getlist("set_b_question_ids[]")
 
-    # Build questions using your existing helpers
-    questions_set_a = get_questions_with_choices(set_a_question_ids)
-    questions_set_b = get_questions_with_choices(set_b_question_ids)
+    # -------------------------
+    # FETCH VIA SERVICE
+    # -------------------------
+    set_a_docs = [
+        QuestionService.get(qid)
+        for qid in set_a_question_ids
+    ]
+    set_b_docs = [
+        QuestionService.get(qid)
+        for qid in set_b_question_ids
+    ]
 
-    set_a_answer_key = build_answer_key(set_a_question_ids)
-    set_b_answer_key = build_answer_key(set_b_question_ids)
+    set_a_docs = [q for q in set_a_docs if q]
+    set_b_docs = [q for q in set_b_docs if q]
+
+    # -------------------------
+    # FIX IMAGE URL
+    # -------------------------
+    for q in set_a_docs:
+        q["image"] = firebase_image_url(q.get("image"))
+
+    for q in set_b_docs:
+        q["image"] = firebase_image_url(q.get("image"))
+
+    # -------------------------
+    # FORMAT FOR TEMPLATE
+    # -------------------------
+    questions_set_a = get_questions_with_choices(set_a_docs)
+    questions_set_b = get_questions_with_choices(set_b_docs)
+
+    set_a_answer_key = build_answer_key(set_a_docs)
+    set_b_answer_key = build_answer_key(set_b_docs)
 
     set_a_choice_map = extract_choices_by_letter(questions_set_a)
     set_b_choice_map = extract_choices_by_letter(questions_set_b)
 
     # -----------------------------
-    # FIRESTORE SAVE (testKeys)
+    # SAVE TESTS VIA SERVICE
     # -----------------------------
-    db.collection("testKeys").document(set_a_id).set({
+    TestService.create_test(set_a_id, {
         "set_id": set_a_id,
         "board_exam": board_exam,
         "subject": subject,
@@ -1597,7 +1698,7 @@ def online_answer_test(request):
         "choiceE": set_a_choice_map.get("E", [])
     })
 
-    db.collection("testKeys").document(set_b_id).set({
+    TestService.create_test(set_b_id, {
         "set_id": set_b_id,
         "board_exam": board_exam,
         "subject": subject,
@@ -1609,33 +1710,26 @@ def online_answer_test(request):
         "choiceE": set_b_choice_map.get("E", [])
     })
 
-    # -----------------------------
-    # FIRESTORE SAVE (answerKeys)
-    # -----------------------------
-    db.collection("answerKeys").document(set_a_id).set({
+    TestService.create_answer_key(set_a_id, {
         "set_id": set_a_id,
-        "board_exam": board_exam,
-        "subject": subject,
         "answer_key": set_a_answer_key
     })
 
-    db.collection("answerKeys").document(set_b_id).set({
+    TestService.create_answer_key(set_b_id, {
         "set_id": set_b_id,
-        "board_exam": board_exam,
-        "subject": subject,
         "answer_key": set_b_answer_key
     })
 
-    # -----------------------------
-    # RETURN RESPONSE (no DB query)
-    # -----------------------------
-    return render(request, 'answer_test.html', {
-        'subject': subject,
-        'board_exam': board_exam,
-        'set_a_questions_choices': questions_set_a,
-        'set_b_questions_choices': questions_set_b,
-        'set_a_id': set_a_id,
-        'set_b_id': set_b_id,
+    # -------------------------
+    # RESPONSE
+    # -------------------------
+    return render(request, "answer_test.html", {
+        "subject": subject,
+        "board_exam": board_exam,
+        "set_a_questions_choices": questions_set_a,
+        "set_b_questions_choices": questions_set_b,
+        "set_a_id": set_a_id,
+        "set_b_id": set_b_id,
     })
 
 

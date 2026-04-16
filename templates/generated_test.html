@@ -149,9 +149,9 @@
                 {% for question in set_a_questions %}
                     <li>
                         {{ question.question_text }}
-                        {% if question.image %}
+                        {% if question.image_url %}
                             <br>
-                            <img src="{{ question.image }}" alt="Question Image">
+                            <img src="{{ question.image_url }}" alt="Question Image">
                         {% endif %}
                         <ul>
                             {% for choice in question.choices %}
@@ -171,9 +171,9 @@
                 {% for question in set_b_questions %}
                     <li>
                         {{ question.question_text }}
-                        {% if question.image %}
+                        {% if question.image_url %}
                             <br>
-                            <img src="{{ question.image }}" alt="Question Image">
+                            <img src="{{ question.image_url }}" alt="Question Image">
                         {% endif %}
                         <ul>
                             {% for choice in question.choices %}

@@ -38,8 +38,9 @@
           <div class="mb-3">
             <h5>{{ forloop.counter }}. {{ q.text }}</h5>
             {% if q.image_name %}
-              <img src="{% url 'serve_image' q.image_name %}" 
-                  alt="figure" 
+              <!-- <img src="{% url 'serve_image' q.image_name %}"  -->
+              <img src="/serve_image/{{ image_url }}">
+              alt="figure" 
                   style="max-width:280px" 
                   class="mb-2"/>
             {% endif %}

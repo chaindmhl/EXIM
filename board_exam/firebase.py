@@ -15,7 +15,7 @@ def initialize_firebase():
         cred = credentials.ApplicationDefault()
 
         firebase_admin.initialize_app(cred, {
-            'storageBucket': 'project-5e6fa15a-0ef4-476a-b87.appspot.com'
+            'storageBucket': 'project-5e6fa15a-0ef4-476a-b87.firebasestorage.app'
         })
 
 

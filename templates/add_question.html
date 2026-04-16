@@ -113,9 +113,19 @@ function updateTopics(i, subjectsObj, selectedSubjects) {
     select.appendChild(new Option("--Select Topic--", ""));
 
     selectedSubjects.forEach(sub => {
-        (subjectsObj[sub] || []).forEach(topic => {
-            select.appendChild(new Option(topic, topic));
-        });
+        const topics = subjectsObj[sub];
+
+        if (Array.isArray(topics)) {
+            topics.forEach(topic => {
+                select.appendChild(new Option(topic, topic));
+            });
+        } else if (typeof topics === "object") {
+            Object.values(topics).forEach(arr => {
+                arr.forEach(topic => {
+                    select.appendChild(new Option(topic, topic));
+                });
+            });
+        }
     });
 }
 
@@ -141,7 +151,9 @@ function createQuestionBlock(i, preset = {}) {
         <!-- SUBJECTS -->
         <div class="mb-2">
             <label>Subjects</label>
-            <select multiple class="form-select subjects" data-i="${i}">
+            <select multiple class="form-select subjects"
+                name="subjects_${i}[]"
+                data-i="${i}">
                 ${Object.keys(preset.subjectsObj || {}).map(sub =>
                     `<option value="${sub}">${sub}</option>`
                 ).join("")}
