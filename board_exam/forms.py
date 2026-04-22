@@ -15,7 +15,7 @@ class SignUpForm(forms.Form):
     )
 
     role = forms.ChoiceField(choices=ROLE_CHOICES)
-    student_id = forms.CharField(max_length=9, required=False)
+
     course = forms.ChoiceField(
         choices=(
             ('Civil Engineering', 'Civil Engineering'),
@@ -35,14 +35,6 @@ class SignUpForm(forms.Form):
     password = forms.CharField(widget=forms.PasswordInput)
     retype_password = forms.CharField(widget=forms.PasswordInput)
 
-    class Meta:
-        model = CustomUser
-        fields = [
-            'role', 'student_id', 'course',
-            'last_name', 'first_name', 'middle_name',
-            'birthdate', 'email', 'password', 'retype_password'
-        ]
-
     def clean_email(self):
         return self.cleaned_data.get('email')
 
@@ -54,12 +46,9 @@ class SignUpForm(forms.Form):
         if cleaned.get('password') != cleaned.get('retype_password'):
             self.add_error('retype_password', 'Passwords do not match.')
 
-        # student-specific checks
-        if role == 'student':
-            if not cleaned.get('student_id'):
-                self.add_error('student_id', 'Student ID is required.')
-            if not cleaned.get('course'):
-                self.add_error('course', 'Course is required.')
+        # only course required for students
+        if role == 'student' and not cleaned.get('course'):
+            self.add_error('course', 'Course is required.')
 
         return cleaned
 

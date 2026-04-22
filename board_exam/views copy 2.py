@@ -331,9 +331,6 @@ def serve_image(request, image_name):
     except Exception:
         raise Http404("Image not found")
 
-# @staticmethod
-# def delete_question(question_id):
-#     db.collection("questions").document(question_id).delete()
 
 from urllib.parse import quote
 
@@ -474,38 +471,6 @@ class Add_Question(View):
         messages.success(request, f"{num_questions} questions added successfully!")
         return redirect("question_bank")
 
-# @staticmethod
-# def get_random_by_subject(subject, num_questions):
-#     docs = db.collection("questions")\
-#         .where("subjects", "array_contains", subject)\
-#         .stream()
-
-#     questions = [{**d.to_dict(), "id": d.id} for d in docs]
-
-#     if num_questions > len(questions):
-#         raise ValueError("Not enough questions")
-
-#     return random.sample(questions, num_questions)
-
-# def get_random_questions(num_questions, subject):
-#     return QuestionService.get_random_by_subject(subject, num_questions)
-
-# def generate_set_id(board_exam):
-#     prefix_map = {
-#         "civil": "CE",
-#         "mechanical": "ME",
-#         "electronics": "ECE",
-#         "electrical": "EE"
-#     }
-
-#     board_exam_lower = board_exam.lower()
-
-#     prefix = "GEN"
-#     for k, v in prefix_map.items():
-#         if k in board_exam_lower:
-#             prefix = v
-
-#     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 def reorder_choices(choices):
     special = []
@@ -570,19 +535,6 @@ def generate_test(request):
         set_a_id = uuid.uuid4().hex
         set_b_id = uuid.uuid4().hex
 
-        # TestService.create_test(set_a_id, {
-        #     "board_exam": board_exam,
-        #     "subject": subject,
-        #     "type": "SET_A",   # 🔥 IMPORTANT FIX
-        #     "questions": selected
-        # })
-
-        # TestService.create_test(set_b_id, {
-        #     "board_exam": board_exam,
-        #     "subject": subject,
-        #     "type": "SET_B",   # 🔥 IMPORTANT FIX
-        #     "questions": random.sample(selected, len(selected))
-        # })
 
         return render(request, "generated_test.html", {
             "set_a_questions": selected,
@@ -644,7 +596,7 @@ def get_questions_with_choices(question_docs):
             "question": q.get("question_text"),
             "choices": formatted_choices,
 
-            # FIXED: your field is "image", not "images"
+            #  ED: your field is "image", not "images"
             "image": q.get("image")
         })
 
@@ -1418,19 +1370,6 @@ def get_subjects(request):
     subjects = TestService.get_all_subjects()
     return JsonResponse({"subjects": subjects})
 
-# def get_testkeys_by_subject(request):
-#     subject = request.GET.get('subject')
-
-#     testkeys = []
-
-#     if subject:
-#         docs = db.collection("answer_keys") \
-#                   .where("subject", "==", subject) \
-#                   .stream()
-
-#         testkeys = [doc.id for doc in docs]
-
-#     return JsonResponse({"testkeys": testkeys})
 
 def download_answer_page(request):
     return render(request, 'download_answer_key.html')
@@ -1457,19 +1396,6 @@ def get_subjects_by_board_exam_and_date(request):
     return JsonResponse({"subjects": subjects})
 
 
-# def view_answer_key(request):
-#     exam_id = request.GET.get('exam_id')
-
-#     doc = db.collection("answer_keys").document(exam_id).get()
-
-#     if not doc.exists:
-#         return JsonResponse({"error": "Not found"})
-
-#     return render(request, 'view_answer_key.html', {
-#         "exam_id": exam_id,
-#         "answer_key": doc.to_dict().get("answer_key", {})
-#     })
-    
 def download_answer_key(request):
     exam_id = request.GET.get('exam_id')
 
@@ -1531,52 +1457,10 @@ def get_subjects_by_board_exam(request):
     return JsonResponse({"subjects": list(subjects)})
 
 
-# Get distinct topics by subject
-# def get_topics_by_subject(request):
-#     subject = request.GET.get('subject')
-
-#     docs = db.collection("questions") \
-#               .where("subject", "==", subject) \
-#               .stream()
-
-#     topics = set()
-
-#     for doc in docs:
-#         data = doc.to_dict()
-#         topics.add(data.get("topic"))
-
-#     return JsonResponse({"topics": list(topics)})
-
-
-# Get test keys by topic (from AnswerKey)
-# def get_testkeys_by_topic(request):
-#     topic = request.GET.get('topic')
-
-#     docs = db.collection("questions") \
-#               .where("topic", "==", topic) \
-#               .stream()
-
-#     subject = None
-#     for doc in docs:
-#         subject = doc.to_dict().get("subject")
-#         break
-
-#     testkeys = []
-
-#     if subject:
-#         keys = db.collection("answer_keys") \
-#                  .where("subject", "==", subject) \
-#                  .stream()
-
-#         testkeys = [doc.id for doc in keys]
-
-#     return JsonResponse({"testkeys": testkeys})
-
-
 def download_exam_results(request):
     subject = request.GET.get('subject')
     exam_date = request.GET.get('exam_date')
-    board_exam = request.GET.get('board_exam')  # ✅ FIX
+    board_exam = request.GET.get('board_exam')  # 
 
     if not subject or not exam_date or not board_exam:
         return JsonResponse({'error': 'Subject, board exam, and exam date are required'})
@@ -1696,7 +1580,7 @@ def upload_answer(request):
         net_cropped, classes_cropped = get_cropped_model()
 
         # =========================
-        # ANSWER KEY (SERVICE FIX)
+        # ANSWER KEY (SERVICE)
         # =========================
         answer_key_data = TestService.get_answer_key(exam_id)
 
@@ -1711,7 +1595,7 @@ def upload_answer(request):
         }
 
         # =========================
-        # STUDENT (SERVICE FIX)
+        # STUDENT (SERVICE)
         # =========================
         uid = request.session.get("uid")
 
@@ -1790,7 +1674,7 @@ def upload_answer(request):
         total_items = len(correct_answers)
 
         # =========================
-        # DUPLICATE CHECK (SERVICE FIX)
+        # DUPLICATE CHECK (SERVICE)
         # =========================
         existing = ResultService.get_by_exam(exam_id)
 
@@ -1798,7 +1682,7 @@ def upload_answer(request):
             return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
 
         # =========================
-        # SAVE RESULT (SERVICE FIX)
+        # SAVE RESULT (SERVICE)
         # =========================
         ResultService.create({
             "uid": str(uid),
@@ -1884,7 +1768,7 @@ def online_answer_test(request):
     set_b_docs = [q for q in set_b_docs if q]
 
     # -------------------------
-    # FIX IMAGE URL
+    #   IMAGE URL
     # -------------------------
     for q in set_a_docs:
         q["image"] = firebase_image_url(q.get("image"))
@@ -1969,7 +1853,7 @@ def answer_test_preview(request, subject, board_exam, set_a_id, set_b_id):
     answer_b = TestService.get_answer_key(set_b_id)
 
     # -----------------------
-    # FIX IMAGE URLS
+    #   IMAGE URLS
     # -----------------------
     for q in test_a.get("questions", []):
         q["image"] = firebase_image_url(q.get("image"))
@@ -2044,7 +1928,7 @@ def answer_online_exam(request):
 
     return render(request, "answer_online_exam.html", {
         "board_exams": list(data.keys()),
-        "exam_data_json": data,   # ✅ IMPORTANT FIX
+        "exam_data_json": data,   # ✅ IMPORTANT  
     })
 
 
@@ -2105,7 +1989,7 @@ def exam_form(request, set_id):
         return redirect("answer_online_exam")
 
     # ===============================
-    # PREVENT DOUBLE SUBMISSION (FIXED)
+    # PREVENT DOUBLE SUBMISSION ( ED)
     # ===============================
     results = ResultService.get_by_user(user_id)
 
@@ -2146,7 +2030,7 @@ def exam_form(request, set_id):
         # ✅ enforce "None/All" to last
         choices_raw = reorder_choices(choices_raw)
 
-        # ✅ assign letters AFTER fixing order
+        # ✅ assign letters AFTER  ing order
         choices = list(zip(letters, choices_raw))
 
         question_choices.append((question_text, choices, image_url))
@@ -2203,7 +2087,7 @@ def exam_form(request, set_id):
         request.session["form_submitted"] = True
 
         # ===============================
-        # SCORING (SERVICE FIXED)
+        # SCORING (SERVICE)
         # ===============================
         answer_data = TestService.get_answer_key(set_id)
 
@@ -2223,7 +2107,7 @@ def exam_form(request, set_id):
                 score += 1
 
         # ===============================
-        # SAVE RESULT (SERVICE FIXED)
+        # SAVE RESULT (SERVICE)
         # ===============================
         result_id = ResultService.create({
             "user_id": user_id,
@@ -2468,10 +2352,10 @@ def build_practice_set(board_exam, subject, num_items):
 
         choices = q.get("choices", [])
 
-        # ✅ FIX: always push special choices to last (E)
+        # ✅  : always push special choices to last (E)
         choices = reorder_choices(choices)
 
-        # ensure correct key mapping (IMPORTANT FIX)
+        # ensure correct key mapping (IMPORTANT  )
         correct_letter = q.get("correct_letter") or q.get("correct_answer")
 
         payload.append({
@@ -2589,7 +2473,7 @@ def practice_take(request, session_id):
         # ✅ STEP 2: enforce "None/All" to be last (E)
         choices = reorder_choices(choices)
 
-        # ✅ STEP 3: assign letters AFTER fixing order
+        # ✅ STEP 3: assign letters AFTER  ing order
         for idx, choice in enumerate(choices):
             choice["display_letter"] = letters[idx]
 
@@ -2792,7 +2676,7 @@ def analytics_dashboard(request):
             time_spent = ans.get("time_spent", 0.0)
 
             # =========================
-            # QUESTION FETCH (SERVICE FIX)
+            # QUESTION FETCH (SERVICE)
             # =========================
             q = QuestionService.get(q_id)
             if not q:

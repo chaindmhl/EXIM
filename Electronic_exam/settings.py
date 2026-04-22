@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from google.oauth2 import service_account
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -15,26 +16,20 @@ SECRET_KEY = os.environ.get(
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY environment variable is not set!")
 
-# -------------------------
-# DEBUG / HOSTS
-# -------------------------
+
+
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS = os.environ.get(
-    "ALLOWED_HOSTS",
-    "exim-app-142442460469.asia-southeast1.run.app,.run.app"
-).split(",")
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "https://exim-268390455018.us-central1.run.app,.run.app").split(",")
 
-# -------------------------
-# API KEYS
-# -------------------------
+
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
-# -------------------------
-# AUTH
-# -------------------------
 AUTH_USER_MODEL = 'board_exam.CustomUser'
+
 LOGIN_URL = '/login/'
+
+
 
 # --------------------------
 # APPLICATION DEFINITION
@@ -46,16 +41,12 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
     'rest_framework',
     'board_exam',
-
     "whitenoise.runserver_nostatic",
+    "storages"
 ]
 
-# -------------------------
-# REST FRAMEWORK
-# -------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -65,13 +56,33 @@ REST_FRAMEWORK = {
     ),
 }
 
-# -------------------------
-# MIDDLEWARE
-# -------------------------
+# from google.cloud import storage
+
+# # This will use:
+# # - Service account credentials in Cloud Run
+# # - GOOGLE_APPLICATION_CREDENTIALS locally (optional)
+# try:
+#     # For Cloud Run or environment with default credentials
+#     client = storage.Client()
+# except Exception:
+#     # Optional: fallback for local development if you want to use JSON file
+#     import os
+#     from google.oauth2 import service_account
+#     GS_CREDENTIALS = service_account.Credentials.from_service_account_file(
+#         os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+#     )
+#     client = storage.Client(credentials=GS_CREDENTIALS)
+
+# DEFAULT_FILE_STORAGE = "storages.backends.gcloud.GoogleCloudStorage"
+# GS_BUCKET_NAME = "project-5e6fa15a-0ef4-476a-b87_cloudbuild"
+# GS_DEFAULT_ACL = None   # Required if using Uniform Bucket Level Access
+# GS_FILE_OVERWRITE = False
+
+# MEDIA_URL = f"https://storage.googleapis.com/{GS_BUCKET_NAME}/"
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
-
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -82,9 +93,6 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'Electronic_exam.urls'
 
-# -------------------------
-# TEMPLATES
-# -------------------------
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -103,19 +111,29 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'Electronic_exam.wsgi.application'
 
-# -------------------------
-# DATABASE (SQLite for Cloud Run)
-# -------------------------
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': os.environ.get('DB_NAME'),
+#         'USER': os.environ.get('DB_USER'),
+#         'PASSWORD': os.environ.get('DB_PASSWORD'),
+#         'HOST': os.environ.get('DB_HOST'),
+#         'PORT': '5432',
+#     }
+# }
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': '/tmp/db.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
-# -------------------------
+
+
+# --------------------------
 # PASSWORD VALIDATION
-# -------------------------
+# --------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -123,32 +141,42 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# -------------------------
+# --------------------------
 # INTERNATIONALIZATION
-# -------------------------
+# --------------------------
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Manila'
 USE_I18N = True
+USE_L10N = True
 USE_TZ = True
 
-# -------------------------
+# --------------------------
 # STATIC FILES
-# -------------------------
+# --------------------------
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static']
-
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-# -------------------------
-# MEDIA FILES (REMOVED FOR FIREBASE STORAGE)
-# -------------------------
-# ❌ DO NOT USE LOCAL MEDIA OR GCS MEDIA SETTINGS ANYMORE
-# Firebase Storage handles this externally
+# # --------------------------
+# # MEDIA FILES
+# # --------------------------
+# MEDIA_URL = '/media/'
+# MEDIA_ROOT = BASE_DIR / 'media'
 
-# -------------------------
-# SECURITY
-# -------------------------
+# --------------------------
+# CSRF & SESSION SECURITY
+# --------------------------
+# CSRF_COOKIE_HTTPONLY = True
+# CSRF_COOKIE_SECURE = not DEBUG
+# SESSION_COOKIE_SECURE = not DEBUG
+
+
+# SESSION_ENGINE = "django.contrib.sessions.backends.db"
+# SESSION_COOKIE_SAMESITE = "Lax"
+# SESSION_COOKIE_SECURE = True
+# CSRF_COOKIE_SAMESITE = "Lax"
+# CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
 
@@ -157,3 +185,17 @@ CSRF_COOKIE_SAMESITE = "Lax"
 
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}

@@ -5,161 +5,209 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Test Analytics | EXIM</title>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
+
 <body class="bg-gray-50 text-gray-900">
 
-  <!-- Navbar -->
-  <nav class="bg-gray-800 p-4">
-    <div class="max-w-7xl mx-auto flex justify-between items-center">
-      <a href="{% url 'home' %}" class="text-white font-bold text-lg">EXIM</a>
-      <ul class="flex space-x-4">
-        <li><a href="{% url 'logout' %}" class="text-white hover:text-blue-400">Logout</a></li>
-      </ul>
+<!-- NAVBAR -->
+<nav class="bg-gray-800 p-4 shadow">
+  <div class="max-w-7xl mx-auto flex justify-between items-center">
+    <a href="{% url 'home' %}" class="text-white font-bold text-lg">EXIM</a>
+    <a href="{% url 'logout' %}" class="text-white hover:text-green-400">Logout</a>
+  </div>
+</nav>
+
+<div class="max-w-7xl mx-auto p-6">
+
+  <!-- TITLE -->
+  <h1 class="text-3xl font-bold text-center text-blue-700 mb-6">
+    📊 Test Analytics Dashboard
+  </h1>
+
+  <!-- COURSE FILTER -->
+  <div class="text-center mb-8">
+    <select id="courseSelect" class="border px-4 py-2 rounded shadow-sm">
+      <option value="all">All Courses</option>
+      {% for course, data in course_data.items %}
+        <option value="course-{{ forloop.counter }}">{{ course }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- COURSES -->
+  {% for course, data in course_data.items %}
+  <div class="course-container mb-16" id="course-{{ forloop.counter }}">
+
+    <!-- COURSE TITLE -->
+    <h2 class="text-2xl font-semibold text-center mb-6">
+      📘 {{ course }}
+    </h2>
+
+    <!-- KPI CARDS -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+
+      <div class="bg-white p-6 rounded shadow text-center">
+        <h3 class="text-gray-500">Passed</h3>
+        <p class="text-2xl font-bold text-green-500">
+          {{ data.passed_counts }}
+        </p>
+      </div>
+
+      <div class="bg-white p-6 rounded shadow text-center">
+        <h3 class="text-gray-500">Failed</h3>
+        <p class="text-2xl font-bold text-red-500">
+          {{ data.failed_counts }}
+        </p>
+      </div>
+
+      <div class="bg-white p-6 rounded shadow text-center">
+        <h3 class="text-gray-500">Average Score</h3>
+        <p class="text-2xl font-bold text-blue-600">
+          {{ data.avg_score|floatformat:2 }}
+        </p>
+      </div>
+
     </div>
-  </nav>
 
-  <div class="max-w-7xl mx-auto p-6">
-    <h1 class="text-3xl font-bold text-blue-700 mb-6 text-center">📊 Test Analytics</h1>
+    <!-- CHARTS -->
+    <div class="grid md:grid-cols-2 gap-6">
 
-    <!-- Dropdown to select course -->
-    <div class="mb-6 text-center">
-      <label for="courseSelect" class="font-semibold mr-2">Select Course:</label>
-      <select id="courseSelect" class="border rounded px-2 py-1">
-        <option value="all">-- All Courses --</option>
-        {% for course, data in course_data.items %}
-          <option value="course-{{ forloop.counter }}">{{ course }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <!-- Course Analytics Containers -->
-    {% for course, data in course_data.items %}
-    <div class="course-container mb-12" id="course-{{ forloop.counter }}">
-      <h2 class="text-2xl font-semibold mb-4 text-center text-gray-800">Course: {{ course }}</h2>
-
-      <!-- Pass/Fail -->
-      <div class="bg-white shadow rounded-lg p-6 mb-8">
-        <h3 class="text-xl font-semibold mb-4">Pass vs Fail</h3>
+      <!-- PASS FAIL -->
+      <div class="bg-white p-6 rounded shadow">
+        <h3 class="font-semibold mb-3">Pass vs Fail</h3>
         <canvas id="passFailChart-{{ forloop.counter }}"></canvas>
       </div>
 
-      <!-- Average Score -->
-      <div class="bg-white shadow rounded-lg p-6 mb-8">
-        <h3 class="text-xl font-semibold mb-4">Average Score</h3>
+      <!-- AVG -->
+      <div class="bg-white p-6 rounded shadow">
+        <h3 class="font-semibold mb-3">Average Score</h3>
         <canvas id="avgScoreChart-{{ forloop.counter }}"></canvas>
       </div>
 
-      <!-- Question Correct/Wrong -->
-      <div class="bg-white shadow rounded-lg p-6 mb-8">
-        <h3 class="text-xl font-semibold mb-4">Correct vs Wrong Answers per Question</h3>
-        <canvas id="questionChart-{{ forloop.counter }}"></canvas>
-      </div>
-
-      <!-- Top Students -->
-      <div class="bg-white shadow rounded-lg p-6 mb-8">
-        <h3 class="text-xl font-semibold mb-4">Top Students</h3>
-        <div class="overflow-x-auto">
-          <table class="min-w-full table-auto border border-gray-200">
-            <thead class="bg-gray-100">
-              <tr>
-                <th class="py-2 px-4 border">Student ID</th>
-                <th class="py-2 px-4 border">Name</th>
-                <th class="py-2 px-4 border">Score</th>
-                <th class="py-2 px-4 border">Total Items</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for student in data.top_students %}
-              <tr class="hover:bg-gray-50">
-                <td class="py-2 px-4 border text-center">{{ student.student_id }}</td>
-                <td class="py-2 px-4 border text-center">{{ student.student_name }}</td>
-                <td class="py-2 px-4 border text-center">{{ student.score }}</td>
-                <td class="py-2 px-4 border text-center">{{ student.total_items }}</td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="4" class="text-center py-2">No data</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- JSON Data for JS -->
-      <script type="application/json" id="passFailData-{{ forloop.counter }}">
-          {{ data.passed_json|safe }}
-      </script>
-      <script type="application/json" id="avgScoreData-{{ forloop.counter }}">
-          {{ data.avg_json|safe }}
-      </script>
-      <script type="application/json" id="questionData-{{ forloop.counter }}">
-          {{ data.question_json|safe }}
-      </script>
-
     </div>
-    {% endfor %}
+
+    <!-- QUESTION ANALYTICS -->
+    <div class="bg-white p-6 rounded shadow mt-6">
+      <h3 class="font-semibold mb-3">Question Performance</h3>
+      <canvas id="questionChart-{{ forloop.counter }}"></canvas>
+    </div>
+
+    <!-- TOP STUDENTS -->
+    <div class="bg-white p-6 rounded shadow mt-6">
+      <h3 class="font-semibold mb-4">🏆 Top Students</h3>
+
+      <div class="overflow-x-auto">
+        <table class="w-full border">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="p-2 border">ID</th>
+              <th class="p-2 border">Name</th>
+              <th class="p-2 border">Score</th>
+              <th class="p-2 border">Items</th>
+            </tr>
+          </thead>
+
+          <tbody>
+          {% for student in data.top_students %}
+            <tr class="text-center hover:bg-gray-50">
+              <td class="p-2 border">{{ student.student_id }}</td>
+              <td class="p-2 border">{{ student.student_name }}</td>
+              <td class="p-2 border">{{ student.score }}</td>
+              <td class="p-2 border">{{ student.total_items }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="text-center p-2">No data</td></tr>
+          {% endfor %}
+          </tbody>
+
+        </table>
+      </div>
+    </div>
+
+    <!-- DATA -->
+    <script type="application/json" id="passFailData-{{ forloop.counter }}">
+      {{ data.passed_json|safe }}
+    </script>
+
+    <script type="application/json" id="avgScoreData-{{ forloop.counter }}">
+      {{ data.avg_json|safe }}
+    </script>
+
+    <script type="application/json" id="questionData-{{ forloop.counter }}">
+      {{ data.question_json|safe }}
+    </script>
 
   </div>
+  {% endfor %}
 
-  <!-- Safe way to pass totalCourses -->
-  {{ course_data|length|json_script:"totalCourses" }}
+</div>
 
-  <!-- Initialize Charts -->
-  <script>
-  document.addEventListener("DOMContentLoaded", function() {
-    const totalCourses = JSON.parse(document.getElementById('totalCourses').textContent);
-    console.log("Total courses:", totalCourses); // For debugging
-      
-      // Initialize all charts
-      for (let i = 1; i <= totalCourses; i++) {
-          const pfData = JSON.parse(document.getElementById(`passFailData-${i}`).textContent);
-          const avgData = JSON.parse(document.getElementById(`avgScoreData-${i}`).textContent);
-          const qData = JSON.parse(document.getElementById(`questionData-${i}`).textContent);
+{{ course_data|length|json_script:"totalCourses" }}
 
-          // Pass/Fail
-          new Chart(document.getElementById(`passFailChart-${i}`), {
-              type: 'bar',
-              data: {
-                  labels: ['Passed', 'Failed'],
-                  datasets: [{ label: 'Students', data: [pfData.passed, pfData.failed], backgroundColor: ['#10B981', '#EF4444'] }]
-              },
-              options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Number of Students' } }, x: { title: { display: true, text: 'Result' } } } }
-          });
+<script>
+document.addEventListener("DOMContentLoaded", function() {
 
-          // Average Score
-          new Chart(document.getElementById(`avgScoreChart-${i}`), {
-              type: 'bar',
-              data: { labels: ['Average Score'], datasets: [{ label: 'Average Score', data: [avgData.avg], backgroundColor: '#2563EB' }] },
-              options: { responsive: true, scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Score' } } } }
-          });
+  const totalCourses = JSON.parse(document.getElementById("totalCourses").textContent);
 
-          // Question Correct/Wrong
-          new Chart(document.getElementById(`questionChart-${i}`), {
-              type: 'bar',
-              data: { labels: qData.labels.map((_, j) => `Q${j+1}`), datasets: [ { label: 'Correct', data: qData.correct, backgroundColor: '#10B981' }, { label: 'Wrong', data: qData.wrong, backgroundColor: '#EF4444' } ] },
-              options: { responsive: true, scales: { y: { beginAtZero: true, title: { display: true, text: 'Number of Students' } }, x: { title: { display: true, text: 'Question' } } } }
-          });
+  for (let i = 1; i <= totalCourses; i++) {
+
+    const pf = JSON.parse(document.getElementById(`passFailData-${i}`).textContent);
+    const avg = JSON.parse(document.getElementById(`avgScoreData-${i}`).textContent);
+    const q = JSON.parse(document.getElementById(`questionData-${i}`).textContent);
+
+    // PASS FAIL PIE
+    new Chart(document.getElementById(`passFailChart-${i}`), {
+      type: 'pie',
+      data: {
+        labels: ['Passed', 'Failed'],
+        datasets: [{
+          data: [pf.passed, pf.failed],
+          backgroundColor: ['#10B981', '#EF4444']
+        }]
       }
+    });
 
-      // --- Dropdown filter ---
-      const select = document.getElementById('courseSelect');
-      select.addEventListener('change', function() {
-          const value = this.value;
-          const containers = document.querySelectorAll('.course-container');
-          containers.forEach(c => c.style.display = 'none');
-          if (value === 'all') {
-              containers.forEach(c => c.style.display = 'block');
-          } else {
-              const selected = document.getElementById(value);
-              if(selected) selected.style.display = 'block';
-          }
-      });
+    // AVG
+    new Chart(document.getElementById(`avgScoreChart-${i}`), {
+      type: 'bar',
+      data: {
+        labels: ['Average'],
+        datasets: [{
+          data: [avg.avg],
+          backgroundColor: '#3B82F6'
+        }]
+      },
+      options: {
+        scales: { y: { beginAtZero: true, max: 100 } }
+      }
+    });
 
-      // Default: show only first course if you want
-      // document.querySelectorAll('.course-container').forEach((c, idx) => c.style.display = idx === 0 ? 'block' : 'none');
+    // QUESTIONS
+    new Chart(document.getElementById(`questionChart-${i}`), {
+      type: 'bar',
+      data: {
+        labels: q.labels,
+        datasets: [
+          { label: 'Correct', data: q.correct, backgroundColor: '#10B981' },
+          { label: 'Wrong', data: q.wrong, backgroundColor: '#EF4444' }
+        ]
+      }
+    });
+  }
+
+  // FILTER
+  document.getElementById("courseSelect").addEventListener("change", function() {
+    const value = this.value;
+    document.querySelectorAll(".course-container").forEach(el => {
+      el.style.display = (value === "all" || el.id === value) ? "block" : "none";
+    });
   });
-  </script>
+
+});
+</script>
 
 </body>
 </html>

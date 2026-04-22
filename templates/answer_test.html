@@ -142,19 +142,21 @@
             <li>
               <div class="question-card">
                 <strong>{{ q.question }}</strong>
-                {% if q.image_url %}
-                  <img src="{{ q.image_url }}" alt="">
+
+                {% if q.image %}
+                  <img src="{{ q.image }}" alt="Question Image">
                 {% endif %}
+
                 <div class="mt-2">
                   {% for choice in q.choices %}
-                    <input type="radio" name="{{ q.id }}" value="{{ choice.letter }}"> {{ choice.letter }}. {{ choice.text }}<br>
+                    <input type="radio" name="{{ q.id }}" value="{{ choice.letter }}">
+                    {{ choice.letter }}. {{ choice.text }}<br>
                   {% endfor %}
                 </div>
               </div>
             </li>
           {% endfor %}
-
-          </ol>          
+        </ol>
     </div>
 
     <!-- Set B -->
@@ -165,18 +167,21 @@
             <li>
               <div class="question-card">
                 <strong>{{ q.question }}</strong>
-                {% if q.image_url %}
-                  <img src="{{ q.image_url }}" alt="">
+
+                {% if q.image %}
+                  <img src="{{ q.image }}" alt="Question Image">
                 {% endif %}
+
                 <div class="mt-2">
                   {% for choice in q.choices %}
-                    <input type="radio" name="{{ q.id }}" value="{{ choice.letter }}"> {{ choice.letter }}. {{ choice.text }}<br>
+                    <input type="radio" name="{{ q.id }}" value="{{ choice.letter }}">
+                    {{ choice.letter }}. {{ choice.text }}<br>
                   {% endfor %}
                 </div>
               </div>
             </li>
           {% endfor %}
-          </ol>          
+        </ol>
     </div>
 </div>
 

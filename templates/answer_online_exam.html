@@ -15,7 +15,6 @@
       color: #111827;
     }
 
-    /* Navbar */
     .navbar {
       background-color: #1f2937;
       padding: 8px 0;
@@ -27,14 +26,12 @@
       font-size: 1.2rem;
     }
 
-    /* Page title */
     h2 {
       text-align: center;
       margin: 40px 0 20px;
       font-weight: 600;
     }
 
-    /* Card Form */
     .exam-card {
       max-width: 620px;
       margin: auto;
@@ -61,7 +58,6 @@
       margin-bottom: 20px;
     }
 
-    /* SUBJECT BUTTON CONTAINER */
     #subjectButtons {
       margin-top: 10px;
       display: flex;
@@ -69,11 +65,10 @@
       gap: 14px;
     }
 
-    /* ✅ THICK SUBJECT BUTTONS */
     .exam-subject-btn {
       width: 100%;
-      min-height: 64px;               /* KEY FIX */
-      padding: 18px 20px;             /* KEY FIX */
+      min-height: 64px;
+      padding: 18px 20px;
       font-size: 1.1rem;
       font-weight: 600;
       border-radius: 14px;
@@ -124,7 +119,7 @@
     <form id="examForm">
       {% csrf_token %}
 
-      <label>Select Board Exam</label>
+      <label for="board_exam">Select Board Exam</label>
       <select id="board_exam" required>
         <option value="" disabled selected>Choose Board Exam</option>
         {% for be in board_exams %}
@@ -143,53 +138,85 @@
     </form>
   </div>
 
+  <!-- SAFE JSON FROM DJANGO -->
+  {{ exam_data_json|json_script:"exam-data" }}
+
   <script>
-    const examData = JSON.parse('{{ exam_data_json|escapejs }}');
-  
-    const boardSelect = document.getElementById("board_exam");
-    const monthInput = document.getElementById("exam_month");
-    const subjectDiv = document.getElementById("subjectButtons");
-    const subjectLabel = document.getElementById("subjectLabel");
-  
-    boardSelect.addEventListener("change", () => {
-      monthInput.disabled = false;
-      subjectDiv.innerHTML = "";
-      subjectLabel.classList.add("d-none");
+    const examDataRaw = JSON.parse(
+    document.getElementById("exam-data").textContent
+  );
+
+  console.log("Loaded exam data:", examDataRaw);
+
+  const boardSelect = document.getElementById("board_exam");
+  const monthInput = document.getElementById("exam_month");
+  const subjectDiv = document.getElementById("subjectButtons");
+  const subjectLabel = document.getElementById("subjectLabel");
+
+  const norm = (s) => (s || "").toString().trim().toUpperCase();
+
+  boardSelect.addEventListener("change", () => {
+    monthInput.disabled = false;
+    subjectDiv.innerHTML = "";
+    subjectLabel.classList.add("d-none");
+  });
+
+  monthInput.addEventListener("change", () => {
+
+    subjectDiv.innerHTML = "";
+
+    const board = norm(boardSelect.value);
+    const monthKey = (monthInput.value || "").substring(0, 7);
+
+    console.log("LOOKING FOR:", board, monthKey);
+    console.log("AVAILABLE KEYS:", Object.keys(examDataRaw));
+
+    if (!board || !monthKey) return;
+
+    // 🔥 FIX: SAFE BOARD MATCH (case/space proof)
+    const boardKey = Object.keys(examDataRaw).find(
+      k => norm(k) === board
+    );
+
+    console.log("MATCHED BOARD KEY:", boardKey);
+
+    const boardData = examDataRaw?.[boardKey];
+
+    console.log("BOARD DATA:", boardData);
+
+    if (!boardData) {
+      subjectDiv.innerHTML = "<p class='text-danger'>No board found.</p>";
+      return;
+    }
+
+    const monthData = boardData?.[monthKey];
+
+    console.log("MONTH DATA:", monthData);
+
+    if (!monthData) {
+      subjectDiv.innerHTML =
+        "<p class='text-danger'>No exams available for this date.</p>";
+      return;
+    }
+
+    subjectLabel.classList.remove("d-none");
+
+    Object.entries(monthData).forEach(([subjectName, sets]) => {
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "exam-subject-btn";
+      btn.textContent = subjectName;
+
+      btn.onclick = () => {
+        const set = sets[0];
+        window.location.href = `/exam_form/${set.set_id}/`;
+      };
+
+      subjectDiv.appendChild(btn);
     });
-  
-    monthInput.addEventListener("change", () => {
-      subjectDiv.innerHTML = "";
-  
-      const board = boardSelect.value;
-      const monthKey = monthInput.value;
-  
-      if (!board || !monthKey) return;
-  
-      const subjects = examData?.[board]?.[monthKey];
-  
-      if (!subjects || Object.keys(subjects).length === 0) {
-        subjectDiv.innerHTML =
-          "<p class='text-danger'>No exams available for this date.</p>";
-        return;
-      }
-  
-      subjectLabel.classList.remove("d-none");
-  
-      Object.entries(subjects).forEach(([subjectName, info]) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "exam-subject-btn";
-        btn.textContent = subjectName;   // ✅ SUBJECT NAME FROM KEY
-  
-        btn.onclick = () => {
-          window.location.href = `/exam_form/${info.set_id}/`;
-        };
-  
-        subjectDiv.appendChild(btn);
-      });
-    });
+  });
   </script>
-  
 
 </body>
 </html>

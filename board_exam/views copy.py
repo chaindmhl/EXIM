@@ -48,7 +48,6 @@ from .services.user_service import UserService
 from .services.question_service import QuestionService
 from .services.test_service import TestService
 from .services.result_service import ResultService
-from .services.practice_service import PracticeService
 from google.cloud import storage
 from firebase_admin import firestore, auth, storage
 import firebase_admin
@@ -121,20 +120,12 @@ def signup(request):
 
             logger.info(f"Firebase user created: {uid}")
 
-            # ✅ PASS ALL EXTRA FIELDS (IMPORTANT)
             UserService.create_user(
                 user_id=uid,
                 email=email,
                 role=role,
                 is_student=(role == "student"),
-                is_staff=(role == "teacher"),
-
-                # 🔥 student + profile fields
-                course=form.cleaned_data.get("course"),
-                last_name=form.cleaned_data.get("last_name"),
-                first_name=form.cleaned_data.get("first_name"),
-                middle_name=form.cleaned_data.get("middle_name"),
-                birthdate=str(form.cleaned_data.get("birthdate")) if form.cleaned_data.get("birthdate") else None,
+                is_staff=(role == "teacher")
             )
 
             logger.info("Firestore user created")
@@ -331,9 +322,9 @@ def serve_image(request, image_name):
     except Exception:
         raise Http404("Image not found")
 
-# @staticmethod
-# def delete_question(question_id):
-#     db.collection("questions").document(question_id).delete()
+@staticmethod
+def delete_question(question_id):
+    db.collection("questions").document(question_id).delete()
 
 from urllib.parse import quote
 
@@ -474,67 +465,53 @@ class Add_Question(View):
         messages.success(request, f"{num_questions} questions added successfully!")
         return redirect("question_bank")
 
-# @staticmethod
-# def get_random_by_subject(subject, num_questions):
-#     docs = db.collection("questions")\
-#         .where("subjects", "array_contains", subject)\
-#         .stream()
+@staticmethod
+def get_random_by_subject(subject, num_questions):
+    docs = db.collection("questions")\
+        .where("subjects", "array_contains", subject)\
+        .stream()
 
-#     questions = [{**d.to_dict(), "id": d.id} for d in docs]
+    questions = [{**d.to_dict(), "id": d.id} for d in docs]
 
-#     if num_questions > len(questions):
-#         raise ValueError("Not enough questions")
+    if num_questions > len(questions):
+        raise ValueError("Not enough questions")
 
-#     return random.sample(questions, num_questions)
+    return random.sample(questions, num_questions)
 
-# def get_random_questions(num_questions, subject):
-#     return QuestionService.get_random_by_subject(subject, num_questions)
+def get_random_questions(num_questions, subject):
+    return QuestionService.get_random_by_subject(subject, num_questions)
 
-# def generate_set_id(board_exam):
-#     prefix_map = {
-#         "civil": "CE",
-#         "mechanical": "ME",
-#         "electronics": "ECE",
-#         "electrical": "EE"
-#     }
+def generate_set_id(board_exam):
+    prefix_map = {
+        "civil": "CE",
+        "mechanical": "ME",
+        "electronics": "ECE",
+        "electrical": "EE"
+    }
 
-#     board_exam_lower = board_exam.lower()
+    board_exam_lower = board_exam.lower()
 
-#     prefix = "GEN"
-#     for k, v in prefix_map.items():
-#         if k in board_exam_lower:
-#             prefix = v
+    prefix = "GEN"
+    for k, v in prefix_map.items():
+        if k in board_exam_lower:
+            prefix = v
 
-#     return f"{prefix}_{uuid.uuid4().hex[:8]}"
-
-def reorder_choices(choices):
-    special = []
-    normal = []
-
-    for c in choices:
-
-        # handle both dict and string formats
-        if isinstance(c, dict):
-            text = c.get("text") or c.get("choice") or ""
-        else:
-            text = str(c)
-
-        if text.strip().lower() in ["none of the above", "all of the above"]:
-            special.append(c)
-        else:
-            normal.append(c)
-
-    return normal + special
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
     
 def generate_test(request):
+
     if request.method == "POST":
 
         board_exam = request.POST.get("board_exam")
         subject = request.POST.get("subject", "")
         num_questions = int(request.POST.get("num_questions", 0))
 
+        # -------------------------
+        # USE SERVICE LAYER (IMPORTANT FIX)
+        # -------------------------
         questions = QuestionService.get_all()
 
+        # FILTER IN PYTHON (safe with your current service)
         if board_exam:
             questions = [
                 q for q in questions
@@ -546,6 +523,10 @@ def generate_test(request):
                 q for q in questions
                 if subject in (q.get("subjects") or [])
             ]
+
+        print("BOARD:", board_exam)
+        print("SUBJECT:", subject)
+        print("RESULT COUNT:", len(questions))
 
         if len(questions) < num_questions:
             return render(request, "generate_test.html", {
@@ -559,38 +540,22 @@ def generate_test(request):
         for q in selected:
             q["image_url"] = firebase_image_url(q.get("image"))
 
-            # reorder choices so "None/All of the above" is always last
-            if "choices" in q and q["choices"]:
-                q["choices"] = reorder_choices(q["choices"])
+        set_id = uuid.uuid4().hex
 
-        # -----------------------------
-        # CREATE ONLY 2 TEST SETS
-        # -----------------------------
-
-        set_a_id = uuid.uuid4().hex
-        set_b_id = uuid.uuid4().hex
-
-        # TestService.create_test(set_a_id, {
-        #     "board_exam": board_exam,
-        #     "subject": subject,
-        #     "type": "SET_A",   # 🔥 IMPORTANT FIX
-        #     "questions": selected
-        # })
-
-        # TestService.create_test(set_b_id, {
-        #     "board_exam": board_exam,
-        #     "subject": subject,
-        #     "type": "SET_B",   # 🔥 IMPORTANT FIX
-        #     "questions": random.sample(selected, len(selected))
-        # })
+        # OPTIONAL: save test metadata
+        TestService.create_test(set_id, {
+            "board_exam": board_exam,
+            "subject": subject,
+            "num_questions": num_questions
+        })
 
         return render(request, "generated_test.html", {
             "set_a_questions": selected,
             "set_b_questions": random.sample(selected, len(selected)),
             "board_exam": board_exam,
             "subject": subject,
-            "set_a_id": set_a_id,
-            "set_b_id": set_b_id,
+            "set_a_id": set_id,
+            "set_b_id": uuid.uuid4().hex,
         })
 
     return render(request, "generate_test.html", {
@@ -1410,27 +1375,40 @@ def upload_file(request):
 def get_exam_id_suggestions(request):
     input_text = request.GET.get('input', '').lower()
 
-    suggestions = TestService.search_answer_keys(input_text)
+    docs = db.collection("answer_keys").stream()
+
+    suggestions = []
+    for doc in docs:
+        if input_text in doc.id.lower():
+            suggestions.append(doc.id)
 
     return JsonResponse(suggestions, safe=False)
 
 def get_subjects(request):
-    subjects = TestService.get_all_subjects()
-    return JsonResponse({"subjects": subjects})
+    docs = db.collection("test_keys").stream()
 
-# def get_testkeys_by_subject(request):
-#     subject = request.GET.get('subject')
+    subjects = set()
 
-#     testkeys = []
+    for doc in docs:
+        data = doc.to_dict()
+        if "subject" in data:
+            subjects.add(data["subject"])
 
-#     if subject:
-#         docs = db.collection("answer_keys") \
-#                   .where("subject", "==", subject) \
-#                   .stream()
+    return JsonResponse({"subjects": list(subjects)})
 
-#         testkeys = [doc.id for doc in docs]
+def get_testkeys_by_subject(request):
+    subject = request.GET.get('subject')
 
-#     return JsonResponse({"testkeys": testkeys})
+    testkeys = []
+
+    if subject:
+        docs = db.collection("answer_keys") \
+                  .where("subject", "==", subject) \
+                  .stream()
+
+        testkeys = [doc.id for doc in docs]
+
+    return JsonResponse({"testkeys": testkeys})
 
 def download_answer_page(request):
     return render(request, 'download_answer_key.html')
@@ -1441,34 +1419,67 @@ def download_exam_results_page(request):
 def get_exam_dates_by_board_exam(request):
     board_exam = request.GET.get('board_exam')
 
-    dates = TestService.get_exam_dates_by_board_exam(board_exam)
+    docs = db.collection("test_keys") \
+              .where("board_exam", "==", board_exam) \
+              .stream()
 
-    return JsonResponse({"dates": dates})
+    dates = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+        if "exam_date" in data:
+            # expected ISO string or timestamp
+            try:
+                dt = data["exam_date"]
+                if isinstance(dt, str):
+                    dt = datetime.fromisoformat(dt)
+
+                dates.add(dt.strftime("%B-%Y"))
+            except:
+                pass
+
+    return JsonResponse({"dates": list(dates)})
 
 def get_subjects_by_board_exam_and_date(request):
     board_exam = request.GET.get('board_exam')
     exam_date = request.GET.get('exam_date')
 
-    subjects = TestService.get_subjects_by_board_exam_and_date(
-        board_exam,
-        exam_date
-    )
+    month, year = exam_date.split('-')
+    month_num = datetime.strptime(month, "%B").month
 
-    return JsonResponse({"subjects": subjects})
+    docs = db.collection("test_keys") \
+              .where("board_exam", "==", board_exam) \
+              .stream()
+
+    subjects = set()
+
+    for doc in docs:
+        data = doc.to_dict()
+
+        if "exam_date" in data:
+            dt = data["exam_date"]
+
+            if isinstance(dt, str):
+                dt = datetime.fromisoformat(dt)
+
+            if dt.month == month_num and dt.year == int(year):
+                subjects.add(data.get("subject"))
+
+    return JsonResponse({"subjects": list(subjects)})
 
 
-# def view_answer_key(request):
-#     exam_id = request.GET.get('exam_id')
+def view_answer_key(request):
+    exam_id = request.GET.get('exam_id')
 
-#     doc = db.collection("answer_keys").document(exam_id).get()
+    doc = db.collection("answer_keys").document(exam_id).get()
 
-#     if not doc.exists:
-#         return JsonResponse({"error": "Not found"})
+    if not doc.exists:
+        return JsonResponse({"error": "Not found"})
 
-#     return render(request, 'view_answer_key.html', {
-#         "exam_id": exam_id,
-#         "answer_key": doc.to_dict().get("answer_key", {})
-#     })
+    return render(request, 'view_answer_key.html', {
+        "exam_id": exam_id,
+        "answer_key": doc.to_dict().get("answer_key", {})
+    })
     
 def download_answer_key(request):
     exam_id = request.GET.get('exam_id')
@@ -1476,10 +1487,12 @@ def download_answer_key(request):
     if not exam_id:
         return JsonResponse({'error': 'Exam ID is required'})
 
-    data = TestService.get_answer_key(exam_id)
+    doc = db.collection("answer_keys").document(exam_id).get()
 
-    if not data:
+    if not doc.exists:
         return JsonResponse({'error': 'Answer key not found'})
+
+    data = doc.to_dict()
 
     file_name = f"answer_key_{exam_id}.txt"
 
@@ -1497,80 +1510,69 @@ def download_answer_key(request):
 
 # Get distinct board exams
 def get_board_exams(request):
+    docs = db.collection("board_exams").stream()
+    exams = [doc.id for doc in docs]
 
-    exams = TestService.get_all_board_exams()
-
-    return JsonResponse({
-        "board_exams": exams
-    })
+    return JsonResponse({"board_exams": exams})
 
 
 # Get distinct subjects by board exam
 def get_subjects_by_board_exam(request):
-
     board_exam = request.GET.get('board_exam')
 
-    if not board_exam:
-        return JsonResponse({"subjects": []})
-
-    questions = QuestionService.get_all()
+    docs = db.collection("questions") \
+              .where("board_exams", "array_contains", board_exam) \
+              .stream()
 
     subjects = set()
 
-    for q in questions:
-
-        board_exams = q.get("board_exams", [])
-
-        if board_exam not in board_exams:
-            continue
-
-        for subj in q.get("subjects", []):
-            if subj:
-                subjects.add(subj)
+    for doc in docs:
+        data = doc.to_dict()
+        subjects.add(data.get("subject"))
 
     return JsonResponse({"subjects": list(subjects)})
 
 
 # Get distinct topics by subject
-# def get_topics_by_subject(request):
-#     subject = request.GET.get('subject')
+def get_topics_by_subject(request):
+    subject = request.GET.get('subject')
 
-#     docs = db.collection("questions") \
-#               .where("subject", "==", subject) \
-#               .stream()
+    docs = db.collection("questions") \
+              .where("subject", "==", subject) \
+              .stream()
 
-#     topics = set()
+    topics = set()
 
-#     for doc in docs:
-#         data = doc.to_dict()
-#         topics.add(data.get("topic"))
+    for doc in docs:
+        data = doc.to_dict()
+        topics.add(data.get("topic"))
 
-#     return JsonResponse({"topics": list(topics)})
+    return JsonResponse({"topics": list(topics)})
 
 
 # Get test keys by topic (from AnswerKey)
-# def get_testkeys_by_topic(request):
-#     topic = request.GET.get('topic')
+def get_testkeys_by_topic(request):
+    topic = request.GET.get('topic')
 
-#     docs = db.collection("questions") \
-#               .where("topic", "==", topic) \
-#               .stream()
+    docs = db.collection("questions") \
+              .where("topic", "==", topic) \
+              .stream()
 
-#     subject = None
-#     for doc in docs:
-#         subject = doc.to_dict().get("subject")
-#         break
+    subject = None
+    for doc in docs:
+        subject = doc.to_dict().get("subject")
+        break
 
-#     testkeys = []
+    testkeys = []
 
-#     if subject:
-#         keys = db.collection("answer_keys") \
-#                  .where("subject", "==", subject) \
-#                  .stream()
+    if subject:
+        keys = db.collection("answer_keys") \
+                 .where("subject", "==", subject) \
+                 .stream()
 
-#         testkeys = [doc.id for doc in keys]
+        testkeys = [doc.id for doc in keys]
 
-#     return JsonResponse({"testkeys": testkeys})
+    return JsonResponse({"testkeys": testkeys})
 
 
 def download_exam_results(request):
@@ -1588,14 +1590,23 @@ def download_exam_results(request):
     except ValueError:
         return JsonResponse({'error': 'Invalid exam date format'})
 
-    tests = TestService.get_by_subject_board_and_date(
-        subject,
-        board_exam,
-        month_num,
-        year
-    )
+    # 🔥 STEP 1: Get matching test_keys
+    test_docs = db.collection("test_keys") \
+        .where("subject", "==", subject) \
+        .where("board_exam", "==", board_exam) \
+        .stream()
 
-    exam_ids = [t["id"] for t in tests]
+    exam_ids = []
+
+    for doc in test_docs:
+        data = doc.to_dict()
+
+        dt = data.get("exam_date")
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt)
+
+        if dt and dt.month == month_num and dt.year == year:
+            exam_ids.append(doc.id)
 
     if not exam_ids:
         return JsonResponse({'error': 'No exams found for this subject/date'})
@@ -1695,42 +1706,37 @@ def upload_answer(request):
         net_original, classes_original = get_original_model()
         net_cropped, classes_cropped = get_cropped_model()
 
-        # =========================
-        # ANSWER KEY (SERVICE FIX)
-        # =========================
-        answer_key_data = TestService.get_answer_key(exam_id)
+        # --- GET ANSWER KEY (FIRESTORE) ---
+        answer_doc = db.collection("answer_keys").document(exam_id).get()
 
-        if not answer_key_data:
+        if not answer_doc.exists:
             return JsonResponse({"error": "Answer key not found"})
 
+        answer_key_data = answer_doc.to_dict()
         subject = answer_key_data.get("subject")
-
         correct_answers = {
             str(k): v['letter']
             for k, v in answer_key_data.get("answer_key", {}).items()
         }
 
-        # =========================
-        # STUDENT (SERVICE FIX)
-        # =========================
-        uid = request.session.get("uid")
+        # --- GET STUDENT (FIRESTORE instead of Django model) ---
+        uid = request.user.id  # or Firebase UID if using Firebase Auth
 
-        if not uid:
-            return JsonResponse({"error": "Not authenticated"})
+        student_doc = db.collection("students").document(str(uid)).get()
 
-        student = UserService.get_user(uid)
-
-        if not student:
+        if not student_doc.exists:
             return JsonResponse({"error": "Student not found"})
 
+        student = student_doc.to_dict()
         student_id = student.get("student_id")
         course = student.get("course")
-        student_name = f"{student.get('last_name', '')} {student.get('first_name', '')}"
+        student_name = student.get("last_name", "") + " " + student.get("first_name", "")
 
         # --- IMAGE DECODE ---
         nparr = np.frombuffer(uploaded_image.read(), np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+        # --- MASK ---
         mask_image = image_to_mask(image)
 
         if mask_image.ndim == 2:
@@ -1790,17 +1796,20 @@ def upload_answer(request):
         total_items = len(correct_answers)
 
         # =========================
-        # DUPLICATE CHECK (SERVICE FIX)
+        # CHECK DUPLICATE
         # =========================
-        existing = ResultService.get_by_exam(exam_id)
+        results_ref = db.collection("results") \
+            .where("uid", "==", str(uid)) \
+            .where("exam_id", "==", exam_id) \
+            .stream()
 
-        if any(r for r in existing if r.get("uid") == str(uid)):
+        if any(results_ref):
             return JsonResponse({'warning': 'Answer already uploaded for this exam.'})
 
         # =========================
-        # SAVE RESULT (SERVICE FIX)
+        # SAVE RESULT (FIRESTORE)
         # =========================
-        ResultService.create({
+        db.collection("results").add({
             "uid": str(uid),
             "student_id": student_id,
             "course": course,
@@ -1826,6 +1835,7 @@ def upload_answer(request):
         })
 
     return render(request, 'upload_answer.html')
+
 
 
 def answer_sheet_view(request):
@@ -1855,8 +1865,6 @@ def extract_choices_by_letter(questions):
 def online_answer_test(request):
     if request.method != "POST":
         return render(request, "answer_test_form.html")
-
-    now = timezone.now()
 
     subject = request.POST.get("subject")
     board_exam = request.POST.get("board_exam")
@@ -1909,7 +1917,6 @@ def online_answer_test(request):
     # -----------------------------
     TestService.create_test(set_a_id, {
         "set_id": set_a_id,
-        "exam_date": now,
         "board_exam": board_exam,
         "subject": subject,
         "questions": questions_set_a,
@@ -1922,7 +1929,6 @@ def online_answer_test(request):
 
     TestService.create_test(set_b_id, {
         "set_id": set_b_id,
-        "exam_date": now,
         "board_exam": board_exam,
         "subject": subject,
         "questions": questions_set_b,
@@ -1997,91 +2003,97 @@ import json
 
 def answer_online_exam(request):
 
-    tests = TestService.get_all_tests()
+    # -----------------------
+    # GET ALL TEST KEYS
+    # -----------------------
+    testkeys = db.collection("testKeys").stream()
+
     data = {}
 
-    for tk in tests:
+    for tk in testkeys:
+        tk_data = tk.to_dict()
 
-        board = (tk.get("board_exam") or "").strip().upper()
-        subject = (tk.get("subject") or "").strip()
-        exam_date_raw = tk.get("exam_date")
-        set_id = tk.get("id")
+        board = tk_data.get("board_exam")
+        exam_date_raw = tk_data.get("exam_date")  # MUST exist in Firestore
+        subject = tk_data.get("subject")
 
-        if not board or not subject or not set_id:
+        if not board or not exam_date_raw or not subject:
             continue
 
-        try:
-            if hasattr(exam_date_raw, "to_datetime"):
-                exam_date = exam_date_raw.to_datetime()
-            elif isinstance(exam_date_raw, datetime):
-                exam_date = exam_date_raw
-            elif isinstance(exam_date_raw, str):
-                exam_date = datetime.fromisoformat(exam_date_raw)
-            else:
+        # Convert Firestore timestamp or string
+        if hasattr(exam_date_raw, "strftime"):
+            month_key = exam_date_raw.strftime("%Y-%m")
+            year = exam_date_raw.year
+            month = exam_date_raw.month
+        else:
+            # if stored as string "YYYY-MM-DD"
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(exam_date_raw)
+                month_key = dt.strftime("%Y-%m")
+                year = dt.year
+                month = dt.month
+            except:
                 continue
-        except:
-            continue
 
-        month_key = f"{exam_date.year}-{exam_date.month:02d}"
-
+        # -----------------------
+        # INIT STRUCTURE
+        # -----------------------
         data.setdefault(board, {})
         data[board].setdefault(month_key, {})
-        data[board][month_key].setdefault(subject, [])
 
-        data[board][month_key][subject].append({
-            "set_id": set_id
-        })
+        if subject not in data[board][month_key]:
 
-    print("\nFINAL DATA:")
-    print(json.dumps(data, indent=2))
+            # -----------------------
+            # FILTER SAME GROUP
+            # -----------------------
+            sets_query = db.collection("testKeys") \
+                .where("board_exam", "==", board) \
+                .where("subject", "==", subject)
 
-    print("\n=== DEBUG STRUCTURE ===")
-    for b, months in data.items():
-        print("BOARD:", b)
-        for m, subjects in months.items():
-            print("  MONTH:", m)
-            print("  SUBJECTS:", list(subjects.keys()))
+            sets_for_subject = [s.to_dict() for s in sets_query.stream()]
 
-    return render(request, "answer_online_exam.html", {
-        "board_exams": list(data.keys()),
-        "exam_data_json": data,   # ✅ IMPORTANT FIX
-    })
+            if not sets_for_subject:
+                continue
 
+            random_set = random.choice(sets_for_subject)
 
-from django.shortcuts import render, redirect
-from django.utils import timezone
-from django.contrib import messages
-from django.utils.dateparse import parse_datetime
-import string, random, uuid
+            data[board][month_key][subject] = {
+                "set_id": random_set.get("set_id"),
+                "subject_group": random_set.get("subject_group", None)
+            }
 
-from .services.test_service import TestService
-from .services.result_service import ResultService
+    return render(
+        request,
+        "answer_online_exam.html",
+        {
+            "board_exams": list(data.keys()),
+            "exam_data_json": json.dumps(data),
+        }
+    )
 
 
 def exam_form(request, set_id):
 
     # ===============================
-    # GET TEST (SERVICE)
+    # GET TEST KEY (FIRESTORE)
     # ===============================
-    test_key = TestService.get_test(set_id)
+    test_ref = db.collection("testKeys").document(set_id).get()
 
-    if not test_key:
+    if not test_ref.exists:
         return redirect("answer_online_exam")
 
-    test_key["set_id"] = set_id
+    test_key = test_ref.to_dict()
 
     # ===============================
-    # GET STUDENT (SESSION AUTH)
+    # GET STUDENT (FIRESTORE or DJANGO HYBRID)
     # ===============================
-    user_id = request.session.get("uid")
+    student_ref = db.collection("students").document(str(request.user.id)).get()
 
-    if not user_id:
+    if not student_ref.exists:
         return redirect("login")
 
-    student = UserService.get_user(user_id)
-
-    if not student:
-        return redirect("login")
+    student = student_ref.to_dict()
 
     # ===============================
     # ACCESS CONTROL
@@ -2105,17 +2117,23 @@ def exam_form(request, set_id):
         return redirect("answer_online_exam")
 
     # ===============================
-    # PREVENT DOUBLE SUBMISSION (FIXED)
+    # PREVENT DOUBLE SUBMISSION
     # ===============================
-    results = ResultService.get_by_user(user_id)
+    results_query = db.collection("results") \
+        .where("user_id", "==", str(request.user.id)) \
+        .where("subject", "==", test_key.get("subject")) \
+        .stream()
 
-    for r in results:
-        if r.get("exam_id") == set_id and r.get("is_submitted"):
-            messages.error(request, "You have already submitted this exam.")
+    result = next(results_query, None)
+
+    if result:
+        result_data = result.to_dict()
+        if result_data.get("is_submitted"):
+            messages.error(request, "You have already submitted this subject.")
             return redirect("warning_page")
 
     # ===============================
-    # BUILD QUESTIONS
+    # PREPARE QUESTIONS
     # ===============================
     question_choices = []
     letters = list(string.ascii_uppercase)[:5]
@@ -2127,12 +2145,12 @@ def exam_form(request, set_id):
     choiceD = test_key.get("choiceD", [])
     choiceE = test_key.get("choiceE", [])
 
-    for i, q in enumerate(questions):
+    for i, question in enumerate(questions):
 
-        question_text = q.get("question_text") or q.get("question")
-        image_url = q.get("image_url") or q.get("image") or ""
+        question_text = question.get("question_text") or question.get("question")
+        image_url = question.get("image_url") or question.get("image") or ""
 
-        choices_raw = [
+        choice_texts = [
             choiceA[i] if i < len(choiceA) else "",
             choiceB[i] if i < len(choiceB) else "",
             choiceC[i] if i < len(choiceC) else "",
@@ -2140,14 +2158,8 @@ def exam_form(request, set_id):
             choiceE[i] if i < len(choiceE) else "",
         ]
 
-        # ✅ shuffle first
-        random.shuffle(choices_raw)
-
-        # ✅ enforce "None/All" to last
-        choices_raw = reorder_choices(choices_raw)
-
-        # ✅ assign letters AFTER fixing order
-        choices = list(zip(letters, choices_raw))
+        random.shuffle(choice_texts)
+        choices = list(zip(letters, choice_texts))
 
         question_choices.append((question_text, choices, image_url))
 
@@ -2155,17 +2167,16 @@ def exam_form(request, set_id):
 
     MAX_ITEMS = 100
     MAX_TIME_SECONDS = 4 * 60 * 60
-
     total_time_limit = int((total_items / MAX_ITEMS) * MAX_TIME_SECONDS)
     per_question_time_limit = total_time_limit / max(total_items, 1)
 
     # ===============================
-    # POST (SUBMIT EXAM)
+    # POST: SUBMIT EXAM
     # ===============================
     if request.method == "POST":
 
         if request.session.get("form_submitted"):
-            messages.error(request, "You already submitted this exam.")
+            messages.error(request, "You have already submitted this exam.")
             return redirect("warning_page")
 
         submitted_answers = []
@@ -2174,7 +2185,8 @@ def exam_form(request, set_id):
             ans = request.POST.get(f"question_{i + 1}")
 
             if not ans:
-                messages.error(request, f"Answer missing for question {i + 1}")
+                messages.error(request, f"Please select an answer for question {i + 1}")
+
                 return render(request, "exam_form.html", {
                     "test_key": test_key,
                     "question_choices": question_choices,
@@ -2187,7 +2199,7 @@ def exam_form(request, set_id):
             submitted_answers.append(ans)
 
         # ===============================
-        # TIME TRACKING
+        # ELAPSED TIME
         # ===============================
         elapsed_time = None
         start_time_str = request.POST.get("start_time")
@@ -2195,45 +2207,49 @@ def exam_form(request, set_id):
         if start_time_str:
             start_time = parse_datetime(start_time_str)
             if start_time:
-                diff = timezone.now() - start_time
-                h, r = divmod(int(diff.total_seconds()), 3600)
+                elapsed_td = timezone.now() - start_time
+
+                h, r = divmod(int(elapsed_td.total_seconds()), 3600)
                 m, s = divmod(r, 60)
+
                 elapsed_time = f"{h}hr {m}min {s}sec"
 
         request.session["form_submitted"] = True
 
         # ===============================
-        # SCORING (SERVICE FIXED)
+        # SCORING (FIRESTORE ANSWER KEY)
         # ===============================
-        answer_data = TestService.get_answer_key(set_id)
+        answer_ref = db.collection("answerKeys").document(set_id).get()
 
-        if not answer_data:
+        if not answer_ref.exists:
             return redirect("warning_page")
 
-        answer_key = answer_data.get("answer_key", {})
+        answer_key = answer_ref.to_dict().get("answer_key", {})
 
         score = 0
-        correct_answers = []
+        correct_text_answers = []
 
         for i, key in enumerate(sorted(answer_key.keys(), key=int)):
-            correct = answer_key[key].get("text", "")
-            correct_answers.append(correct)
+            correct_text = answer_key[key].get("text", "")
+            correct_text_answers.append(correct_text)
 
-            if i < len(submitted_answers) and submitted_answers[i] == correct:
+            if i < len(submitted_answers) and submitted_answers[i] == correct_text:
                 score += 1
 
         # ===============================
-        # SAVE RESULT (SERVICE FIXED)
+        # SAVE RESULT (FIRESTORE)
         # ===============================
-        result_id = ResultService.create({
-            "user_id": user_id,
+        result_id = str(uuid.uuid4())
+
+        db.collection("results").document(result_id).set({
+            "user_id": str(request.user.id),
             "student_id": student.get("student_id"),
             "course": student.get("course"),
-            "student_name": student.get("first_name", "") + " " + student.get("last_name", ""),
+            "student_name": student.get("name"),
             "subject": test_key.get("subject"),
             "exam_id": set_id,
             "answer": submitted_answers,
-            "correct_answer": correct_answers,
+            "correct_answer": correct_text_answers,
             "score": score,
             "total_items": total_items,
             "is_submitted": True,
@@ -2244,7 +2260,7 @@ def exam_form(request, set_id):
         return redirect("result_page", result_id=result_id)
 
     # ===============================
-    # GET
+    # GET REQUEST
     # ===============================
     return render(request, "exam_form.html", {
         "test_key": test_key,
@@ -2258,10 +2274,12 @@ def exam_form(request, set_id):
 
 def result_page(request, result_id):
 
-    result = ResultService.get_by_id(result_id)
+    result_ref = db.collection("results").document(result_id).get()
 
-    if not result:
+    if not result_ref.exists:
         return render(request, "result_page.html", {"error": "Result not found"})
+
+    result = result_ref.to_dict()
 
     percent = 0
     if result.get("total_items"):
@@ -2282,43 +2300,31 @@ def warning_page(request):
 
 def view_results(request):
 
-    # =========================
-    # GET USER FROM SESSION (CONSISTENT WITH PRACTICE_START)
-    # =========================
-    user_id = request.session.get("uid")
+    user_id = str(request.user.id)
 
-    if not user_id:
-        return redirect("login")
+    results_query = db.collection("results") \
+        .where("user_id", "==", user_id) \
+        .stream()
 
-    student = UserService.get_user(user_id)
-
-    if not student:
-        return redirect("login")
-
-    # =========================
-    # GET RESULTS
-    # =========================
-    results = ResultService.get_by_user(user_id)
+    results = [r.to_dict() for r in results_query]
 
     # sort by timestamp (latest first)
-    results.sort(
-        key=lambda x: x.get("timestamp", ""),
-        reverse=True
-    )
+    results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 
     return render(request, "view_results.html", {
         "results": results
     })
-
+    
 def question_analytics(request):
 
-    questions = QuestionService.get_all()
+    questions = db.collection("questions").stream()
 
     board_exam_counts = {}
     subject_counts = {}
     difficulty_counts = {}
 
-    for data in questions:
+    for q in questions:
+        data = q.to_dict()
 
         board_exams = data.get("board_exams", [])
         subjects = data.get("subjects", [])
@@ -2451,60 +2457,11 @@ def test_analytics(request):
         "course_data": course_data
     })
 
-def build_practice_set(board_exam, subject, num_items):
-
-    questions = QuestionService.get_by_board_and_subject(board_exam, subject)
-
-    if not questions:
-        return None
-
-    random.shuffle(questions)
-
-    selected = questions[:num_items]
-
-    payload = []
-
-    for q in selected:
-
-        choices = q.get("choices", [])
-
-        # ✅ FIX: always push special choices to last (E)
-        choices = reorder_choices(choices)
-
-        # ensure correct key mapping (IMPORTANT FIX)
-        correct_letter = q.get("correct_letter") or q.get("correct_answer")
-
-        payload.append({
-            "id": q["id"],
-            "text": q.get("question_text"),
-            "image_name": q.get("image_name") or q.get("image"),
-            "choices": choices,
-            "correct": correct_letter,
-            "subject": subject,
-            "topic": q.get("topic", "Misc"),
-            "difficulty": q.get("difficulty", "Unknown"),
-        })
-
-    return payload
-
 # ---- Practice: start ----
 @require_http_methods(["GET", "POST"])
 def practice_start(request):
 
-    # =========================
-    # GET USER FROM SESSION
-    # =========================
-    user_id = request.session.get("uid")
-
-    if not user_id:
-        return redirect("login")
-
-    student = UserService.get_user(user_id)
-
-    if not student:
-        return redirect("login")
-
-    student_course_full = (student.get("course") or "").strip().lower()
+    student_course_full = request.user.student.course.strip().lower()
 
     course_mapping = {
         "civil engineering": "CE",
@@ -2521,11 +2478,7 @@ def practice_start(request):
 
     subjects = list(BOARD_EXAM_TOPICS.get(student_course_code, {}).keys())
 
-    # =========================
-    # POST
-    # =========================
     if request.method == "POST":
-
         subject_name = request.POST.get("subject")
 
         try:
@@ -2534,17 +2487,41 @@ def practice_start(request):
             num_items = 5
 
         # =========================
-        # 🔥 CACHE BUILDER USED HERE
+        # FIRESTORE QUESTION QUERY
         # =========================
-        payload = build_practice_set(
-            student_course_code,
-            subject_name,
-            num_items
-        )
+        questions_ref = db.collection("questions") \
+            .where("board_exams", "array_contains", student_course_code) \
+            .where("subjects", "array_contains", subject_name) \
+            .stream()
 
-        if not payload:
+        qs = []
+        for doc in questions_ref:
+            q = doc.to_dict()
+            q["id"] = doc.id
+            qs.append(q)
+
+        if not qs:
             messages.error(request, "No questions found for this subject!")
             return redirect("practice_start")
+
+        available = len(qs)
+
+        if num_items > available:
+            messages.error(request, f"You selected {num_items} but only {available} questions exist!")
+            return redirect("practice_start")
+
+        random.shuffle(qs)
+        chosen = qs[:num_items]
+
+        payload = []
+        for q in chosen:
+            payload.append({
+                "id": q["id"],
+                "text": q.get("question_text"),
+                "image_name": q.get("image_name"),
+                "choices": q.get("choices", []),  # must be stored as list in Firestore
+                "correct": q.get("correct_answer"),
+            })
 
         session_id = str(uuid.uuid4())
 
@@ -2565,6 +2542,7 @@ def practice_start(request):
     })
 
 
+
 # ---- Practice: take (render questions + timer) ----
 def practice_take(request, session_id):
 
@@ -2582,14 +2560,8 @@ def practice_take(request, session_id):
     for qi, q in enumerate(data["questions"], start=1):
 
         choices = q["choices"].copy()
-
-        # ✅ STEP 1: shuffle choices
         random.shuffle(choices)
 
-        # ✅ STEP 2: enforce "None/All" to be last (E)
-        choices = reorder_choices(choices)
-
-        # ✅ STEP 3: assign letters AFTER fixing order
         for idx, choice in enumerate(choices):
             choice["display_letter"] = letters[idx]
 
@@ -2607,6 +2579,7 @@ def practice_take(request, session_id):
         "questions": questions_for_client,
         "total_items": data["total_items"],
     })
+
 
 
 # ---- Practice: submit (grade & analytics) ----
@@ -2642,27 +2615,31 @@ def practice_submit(request, session_id):
         correct_key = q.get('correct')
         is_correct = (ans == correct_key)
 
+        # ---- NO ORM: fetch from session only (or embed metadata in Firestore later)
         subject = q.get("subject", "Unknown")
         topic = q.get("topic", "Misc")
         difficulty = q.get("difficulty", "Unknown")
 
-        # SUBJECT
+        # ================= SUBJECT TRACKER =================
         subject_tracker.setdefault(subject, {"correct": 0, "total": 0, "time": 0})
         subject_tracker[subject]["total"] += 1
         subject_tracker[subject]["time"] += time_spent
+
         if is_correct:
             subject_tracker[subject]["correct"] += 1
 
-        # TOPIC
-        topic_tracker.setdefault(topic, {"correct": 0, "total": 0, "time": 0})
+        # ================= TOPIC TRACKER =================
+        topic_tracker.setdefault(topic, {"correct": 0, "total": 0, "time": 0, "subject": subject})
         topic_tracker[topic]["total"] += 1
         topic_tracker[topic]["time"] += time_spent
+
         if is_correct:
             topic_tracker[topic]["correct"] += 1
 
-        # DIFFICULTY
-        difficulty_tracker.setdefault(difficulty, {"correct": 0, "total": 0, "time": 0})
+        # ================= DIFFICULTY TRACKER =================
+        difficulty_tracker.setdefault(difficulty, {"correct": 0, "total": 0})
         difficulty_tracker[difficulty]["total"] += 1
+
         if is_correct:
             difficulty_tracker[difficulty]["correct"] += 1
 
@@ -2684,55 +2661,81 @@ def practice_submit(request, session_id):
     score = correct_count
     pct = (score / total_items * 100) if total_items else 0
 
-    user_id = request.session.get("uid")
+    # =========================
+    # FIRESTORE HELPERS
+    # =========================
+    def update_counter(doc_ref, correct, total, time_sum=None):
+        doc = doc_ref.get()
+        if doc.exists:
+            data_old = doc.to_dict()
+        else:
+            data_old = {
+                "total_items_answered": 0,
+                "total_correct": 0,
+                "total_attempts": 0,
+                "average_time_per_item": 0
+            }
+
+        total_items_answered = data_old.get("total_items_answered", 0) + total
+        total_correct = data_old.get("total_correct", 0) + correct
+        total_attempts = data_old.get("total_attempts", 0) + 1
+
+        prev_avg_time = data_old.get("average_time_per_item", 0)
+        prev_total = data_old.get("total_items_answered", 0)
+
+        new_time = (prev_avg_time * prev_total) + (time_sum or 0)
+        avg_time = new_time / total_items_answered if total_items_answered else 0
+
+        doc_ref.set({
+            "total_items_answered": total_items_answered,
+            "total_correct": total_correct,
+            "total_attempts": total_attempts,
+            "average_time_per_item": avg_time
+        }, merge=True)
 
     # =========================
-    # ANALYTICS UPDATE (SERVICE)
+    # UPDATE SUBJECT ANALYTICS
     # =========================
     for subject, stats in subject_tracker.items():
-        PracticeService.update_analytics(
-            "subject_analytics",
-            f"{user_id}_{subject}_{data['board_exam']}",
-            {
-                "correct": stats["correct"],
-                "total": stats["total"],
-                "time": stats["time"]
-            }
-        )
+        doc_ref = db.collection("subject_analytics") \
+            .document(f"{request.user.id}_{subject}_{data['board_exam']}")
 
+        update_counter(doc_ref, stats["correct"], stats["total"], stats["time"])
+
+    # =========================
+    # UPDATE TOPIC ANALYTICS
+    # =========================
     for topic, stats in topic_tracker.items():
-        PracticeService.update_analytics(
-            "topic_analytics",
-            f"{user_id}_{topic}",
-            {
-                "correct": stats["correct"],
-                "total": stats["total"],
-                "time": stats["time"]
-            }
-        )
+        doc_ref = db.collection("topic_analytics") \
+            .document(f"{request.user.id}_{topic}")
 
+        update_counter(doc_ref, stats["correct"], stats["total"], stats["time"])
+
+    # =========================
+    # UPDATE DIFFICULTY ANALYTICS
+    # =========================
     for difficulty, stats in difficulty_tracker.items():
-        PracticeService.update_analytics(
-            "difficulty_analytics",
-            f"{user_id}_{difficulty}_{data['board_exam']}",
-            {
-                "correct": stats["correct"],
-                "total": stats["total"],
-                "time": stats["time"]
-            }
-        )
+        doc_ref = db.collection("difficulty_analytics") \
+            .document(f"{request.user.id}_{difficulty}_{data['board_exam']}")
+
+        doc_ref.set({
+            "total_items_answered": firestore.Increment(stats["total"]),
+            "total_correct": firestore.Increment(stats["correct"])
+        }, merge=True)
+
     # =========================
-    # SAVE RESULT (SERVICE)
+    # SAVE PRACTICE RESULT
     # =========================
-    PracticeService.save_result(session_id, {
+    db.collection("practice_results").add({
         "session_id": session_id,
-        "user_id": user_id,
+        "user_id": request.user.id,
         "board_exam": data["board_exam"],
         "total_items": total_items,
         "score": score,
         "percent": pct,
         "total_time": total_time_elapsed,
         "answers": results,
+        "created_at": firestore.SERVER_TIMESTAMP
     })
 
     # =========================
@@ -2745,19 +2748,25 @@ def practice_submit(request, session_id):
         "results": results,
         "total_time": total_time_elapsed,
         "board_exam": data["board_exam"],
+        "created_at": timezone.now().isoformat(),
     }
 
     request.session.modified = True
 
     return redirect('practice_result_page', session_id=session_id)
 
+
 def practice_result_page(request, session_id):
 
-    res = PracticeService.get_result(session_id)
+    doc = db.collection("practice_results") \
+        .document(session_id) \
+        .get()
 
-    if not res:
+    if not doc.exists:
         messages.error(request, "No practice results found for that session.")
         return redirect('practice_start')
+
+    res = doc.to_dict()
 
     return render(request, 'practice_result.html', {
         'res': res
@@ -2768,18 +2777,18 @@ from django.core.serializers.json import DjangoJSONEncoder
 @firebase_login_required
 def analytics_dashboard(request):
 
-    user_id = request.session.get("uid")
+    user_id = request.user.id
 
-    if not user_id:
-        return redirect("login")
-
-    results = ResultService.get_by_user(user_id)
+    results_ref = db.collection("practice_results") \
+        .where("user_id", "==", user_id) \
+        .stream()
 
     subject_data = {}
     topic_data = {}
     difficulty_data = {}
 
-    for res in results:
+    for doc in results_ref:
+        res = doc.to_dict()
 
         board_exam = res.get("board_exam")
         answers = res.get("answers", [])
@@ -2792,11 +2801,13 @@ def analytics_dashboard(request):
             time_spent = ans.get("time_spent", 0.0)
 
             # =========================
-            # QUESTION FETCH (SERVICE FIX)
+            # QUESTION FETCH (FIRESTORE)
             # =========================
-            q = QuestionService.get(q_id)
-            if not q:
+            q_doc = db.collection("questions").document(q_id).get()
+            if not q_doc.exists:
                 continue
+
+            q = q_doc.to_dict()
 
             subjects = q.get("subjects", [])
             topic = q.get("topic", "Misc")

@@ -26,3 +26,17 @@ class ResultService:
             .stream()
 
         return [{**d.to_dict(), "id": d.id} for d in docs]
+    
+    @staticmethod
+    def get_by_exam_ids(exam_ids):
+        docs = db.collection("results")\
+            .where("exam_id", "in", exam_ids[:10])\
+            .stream()
+
+        return [{**d.to_dict(), "id": d.id} for d in docs]
+    
+    #exam analytics
+    @staticmethod
+    def get_all():
+        docs = db.collection("results").stream()
+        return [{**d.to_dict(), "id": d.id} for d in docs]

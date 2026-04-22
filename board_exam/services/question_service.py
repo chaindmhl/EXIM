@@ -88,3 +88,23 @@ class QuestionService:
         db.collection(QuestionService.COLLECTION).document(question_id).update({
             "usage_count": firestore.Increment(1)
         })
+    
+    @staticmethod
+    def get_by_board_and_subject(board_exam, subject):
+
+        docs = (
+            db.collection(QuestionService.COLLECTION)
+            .where("board_exams", "array_contains", board_exam)
+            .stream()
+        )
+
+        results = []
+
+        for d in docs:
+            data = d.to_dict()
+
+            # 🔥 filter subject manually
+            if subject in data.get("subjects", []):
+                results.append({**data, "id": d.id})
+
+        return results

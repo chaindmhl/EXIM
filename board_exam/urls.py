@@ -39,17 +39,17 @@ urlpatterns = [
     
     # Exams / forms / results
     path('exam_form/<str:set_id>/', views.exam_form, name='exam_form'),
-    path('result/<int:result_id>/', views.result_page, name='result_page'),
+    path("result/<str:result_id>/", views.result_page, name="result_page"),
     path('warning/', views.warning_page, name='warning_page'),
 
     # APIs / AJAX endpoints
     path('get_exam_id_suggestions', views.get_exam_id_suggestions, name='get_exam_id_suggestions'),
-    path('get_subjects/', views.get_subjects, name='get_subjects'),
-    path('get_testkeys_by_subject/', views.get_testkeys_by_subject, name='get_testkeys_by_subject'),
+    # path('get_subjects/', views.get_subjects, name='get_subjects'),
+    # path('get_testkeys_by_subject/', views.get_testkeys_by_subject, name='get_testkeys_by_subject'),
     path('get_board_exams/', views.get_board_exams, name='get_board_exams'),
     path('get_subjects_by_board_exam/', views.get_subjects_by_board_exam, name='get_subjects_by_board_exam'),
-    path('get_topics_by_subject/', views.get_topics_by_subject, name='get_topics_by_subject'),
-    path('get_testkeys_by_topic/', views.get_testkeys_by_topic, name='get_testkeys_by_topic'),
+    # path('get_topics_by_subject/', views.get_topics_by_subject, name='get_topics_by_subject'),
+    # path('get_testkeys_by_topic/', views.get_testkeys_by_topic, name='get_testkeys_by_topic'),
     path('get_exam_dates_by_board_exam/', views.get_exam_dates_by_board_exam, name='get_exam_dates_by_board_exam'),
     path('get_get_subjects_by_board_exam_and_date/', views.get_subjects_by_board_exam_and_date, name='get_subjects_by_board_exam_and_date'),
 
